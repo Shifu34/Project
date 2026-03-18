@@ -223,15 +223,13 @@ export const getDoctorAppointments = async (req: Request, res: Response, next: N
 };
 
 // GET /doctors/search  — public, no auth required
-// Query params: q (name/dept/specialization), department (name), specialization, page, limit
+// Query params: search (searches name, specialization, department), page, limit
 export const searchDoctors = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const page           = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
-    const limit          = Math.min(100, parseInt(req.query.limit as string || '20', 10));
-    const q              = (req.query.q              as string || '').trim();
-    const department     = (req.query.department     as string || '').trim();
-    const specialization = (req.query.specialization as string || '').trim();
-    const offset         = (page - 1) * limit;
+    const page   = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
+    const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
+    const search = (req.query.search as string || '').trim();
+    const offset = (page - 1) * limit;
 
     const dataConditions: string[]  = ['d.is_active = true'];
     const dataParams: unknown[]     = [limit, offset];
@@ -241,30 +239,16 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
     const countParams: unknown[]    = [];
     let countIdx = 1;
 
-    if (q) {
+    if (search) {
       const clause = `(CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${dataIdx} OR d.specialization ILIKE $${dataIdx} OR dept.name ILIKE $${dataIdx})`;
       dataConditions.push(clause);
-      dataParams.push(`%${q}%`);
+      dataParams.push(`%${search}%`);
       dataIdx++;
 
       const cClause = `(CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${countIdx} OR d.specialization ILIKE $${countIdx} OR dept.name ILIKE $${countIdx})`;
       countConditions.push(cClause);
-      countParams.push(`%${q}%`);
+      countParams.push(`%${search}%`);
       countIdx++;
-    }
-
-    if (department) {
-      dataConditions.push(`dept.name ILIKE $${dataIdx++}`);
-      dataParams.push(`%${department}%`);
-      countConditions.push(`dept.name ILIKE $${countIdx++}`);
-      countParams.push(`%${department}%`);
-    }
-
-    if (specialization) {
-      dataConditions.push(`d.specialization ILIKE $${dataIdx++}`);
-      dataParams.push(`%${specialization}%`);
-      countConditions.push(`d.specialization ILIKE $${countIdx++}`);
-      countParams.push(`%${specialization}%`);
     }
 
     const where      = `WHERE ${dataConditions.join(' AND ')}`;
@@ -464,7 +448,7 @@ export const upsertDoctorProfileByDoctor = async (req: AuthRequest, res: Respons
 };
 
 // POST /doctors/:id/schedule
-// Accepts: { date, time_slots: [{ start_time, end_time, appointment_type, max_appointments, is_available }] }
+// Accepts: { schedules: [{ day, start_time, end_time, slot_duration, appointment_type }] }
 export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const doctorId = parseInt(req.params.id, 10);
@@ -474,41 +458,62 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
       return;
     }
 
-    const { date, time_slots } = req.body;
-    const dayOfWeek = getDayNameFromDate(date);
-
-    const slots = Array.isArray(time_slots) ? time_slots : [];
-    if (slots.length === 0) {
-      res.status(400).json({ success: false, message: 'time_slots must be a non-empty array' });
+    const { schedules } = req.body;
+    const entries = Array.isArray(schedules) ? schedules : [];
+    if (entries.length === 0) {
+      res.status(400).json({ success: false, message: 'schedules must be a non-empty array' });
       return;
     }
 
-    const updatedRows: unknown[] = [];
-    for (const slot of slots) {
-      const startTime = slot.start_time;
-      const endTime = slot.end_time;
-      const appointmentType = slot.appointment_type || 'Online Consultation';
-      const maxAppointments = slot.max_appointments ?? 20;
-      const isAvailable = slot.is_available ?? true;
+    const typeMap: Record<string, string> = {
+      clinic: 'In-clinic Visit',
+      online: 'Online Consultation',
+      'in-clinic visit': 'In-clinic Visit',
+      'online consultation': 'Online Consultation',
+    };
 
-      if (!startTime || !endTime) {
-        res.status(400).json({ success: false, message: 'Each slot must include start_time and end_time' });
+    const updatedRows: unknown[] = [];
+    for (const entry of entries) {
+      const { day, start_time, end_time, slot_duration, appointment_type } = entry;
+
+      if (!day || !start_time || !end_time) {
+        res.status(400).json({ success: false, message: 'Each schedule must include day, start_time, and end_time' });
         return;
+      }
+
+      const normalizedDay = String(day).charAt(0).toUpperCase() + String(day).slice(1).toLowerCase();
+      const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      if (!validDays.includes(normalizedDay)) {
+        res.status(400).json({ success: false, message: `Invalid day: ${day}. Must be a full day name (e.g. Monday)` });
+        return;
+      }
+
+      const mappedType = typeMap[(String(appointment_type || 'online')).toLowerCase()] || 'Online Consultation';
+
+      // Calculate max_appointments from slot_duration if provided
+      let maxAppointments = 20;
+      if (slot_duration && slot_duration > 0) {
+        const [sh, sm] = start_time.split(':').map(Number);
+        const [eh, em] = end_time.split(':').map(Number);
+        const totalMinutes = (eh * 60 + em) - (sh * 60 + sm);
+        if (totalMinutes > 0) {
+          maxAppointments = Math.floor(totalMinutes / slot_duration);
+        }
       }
 
       const upsert = await query(
         `INSERT INTO doctor_schedules
            (doctor_id, day_of_week, appointment_type, start_time, end_time, max_appointments, is_available)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         VALUES ($1, $2, $3, $4, $5, $6, true)
          ON CONFLICT (doctor_id, day_of_week, appointment_type)
          DO UPDATE SET
            start_time = EXCLUDED.start_time,
            end_time = EXCLUDED.end_time,
            max_appointments = EXCLUDED.max_appointments,
-           is_available = EXCLUDED.is_available,
+           is_available = true,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
-        [doctorId, dayOfWeek, appointmentType, startTime, endTime, maxAppointments, isAvailable],
+        [doctorId, normalizedDay, mappedType, start_time, end_time, maxAppointments],
       );
 
       updatedRows.push(upsert.rows[0]);
@@ -519,11 +524,34 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
       message: 'Doctor schedule saved successfully',
       data: {
         doctor_id: doctorId,
-        date,
-        day_of_week: dayOfWeek,
         schedules: updatedRows,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// DELETE /doctors/schedule/:scheduleId
+export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const scheduleId = parseInt(req.params.scheduleId, 10);
+
+    const scheduleRes = await query(`SELECT * FROM doctor_schedules WHERE id = $1`, [scheduleId]);
+    if (scheduleRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Schedule not found' });
+      return;
+    }
+
+    const doctorId = scheduleRes.rows[0].doctor_id;
+    const allowed = await canDoctorManageProfile(req, doctorId);
+    if (!allowed) {
+      res.status(403).json({ success: false, message: 'You can only delete your own schedule' });
+      return;
+    }
+
+    await query(`DELETE FROM doctor_schedules WHERE id = $1`, [scheduleId]);
+    res.json({ success: true, message: 'Schedule deleted successfully' });
   } catch (err) {
     next(err);
   }

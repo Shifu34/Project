@@ -8,8 +8,7 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/me/:page/:size',  apptCtrl.getMyAppointments);
-router.get('/:page/:size',     apptCtrl.getAppointments);
+router.get('/me',              apptCtrl.getMyAppointments);
 router.get('/:id',             apptCtrl.getAppointmentById);
 
 router.post('/',

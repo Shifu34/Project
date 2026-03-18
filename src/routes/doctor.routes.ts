@@ -36,10 +36,14 @@ router.post('/:id/profile',
 
 router.post('/:id/schedule',
   authorize('admin', 'doctor'),
-  body('date').isISO8601().withMessage('date must be a valid date (YYYY-MM-DD)'),
-  body('time_slots').isArray({ min: 1 }).withMessage('time_slots must be a non-empty array'),
+  body('schedules').isArray({ min: 1 }).withMessage('schedules must be a non-empty array'),
   validate,
   doctorCtrl.addDoctorSchedule,
+);
+
+router.delete('/schedule/:scheduleId',
+  authorize('admin', 'doctor'),
+  doctorCtrl.deleteDoctorSchedule,
 );
 
 export default router;

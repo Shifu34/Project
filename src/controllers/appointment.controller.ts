@@ -165,8 +165,8 @@ export const getMyAppointments = async (req: AuthRequest, res: Response, next: N
   try {
     const userId   = req.user!.userId;
     const roleName = req.user!.roleName;
-    const page   = Math.max(1,   parseInt(req.params.page as string || '1',  10));
-    const size   = Math.min(100, parseInt(req.params.size as string || '20', 10));
+    const page   = Math.max(1,   parseInt(req.query.page as string || '1',  10));
+    const size   = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const status = req.query.status as string | undefined;
     const date   = req.query.date   as string | undefined;
     const offset = (page - 1) * size;
