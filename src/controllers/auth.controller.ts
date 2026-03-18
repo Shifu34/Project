@@ -139,6 +139,13 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       }
     }
 
+    // Fetch doctor_id if the user is a doctor
+    let doctorId: number | null = null;
+    if (user.role_name === 'doctor') {
+      const doctorRes = await query(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [user.id]);
+      if (doctorRes.rows.length > 0) doctorId = doctorRes.rows[0].id;
+    }
+
     const payload = { userId: user.id, roleId: user.role_id, roleName: user.role_name, email: user.email };
     const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
     const refreshToken = jwt.sign(payload, env.jwtRefreshSecret, { expiresIn: env.jwtRefreshExpiresIn } as jwt.SignOptions);
@@ -159,6 +166,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           cnic: user.cnic,
           gender: patientData.gender ?? null,
           date_of_birth: patientData.date_of_birth ?? null,
+          ...(doctorId !== null && { doctor_id: doctorId }),
         },
       },
     });

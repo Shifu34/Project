@@ -3,12 +3,6 @@ import bcrypt from 'bcryptjs';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 
-const getDayNameFromDate = (dateStr: string): string => {
-  const d = new Date(`${dateStr}T00:00:00`);
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  return days[d.getDay()];
-};
-
 const canDoctorManageProfile = async (req: AuthRequest, doctorId: number): Promise<boolean> => {
   if (!req.user) return false;
   if (req.user.roleName === 'admin') return true;
@@ -326,42 +320,32 @@ export const getDoctorProfile = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// GET /doctors/:id/schedule?date=YYYY-MM-DD
+// GET /doctors/:id/schedule
 export const getDoctorScheduleByDate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
-    const dayOfWeek = getDayNameFromDate(date);
-
     const result = await query(
-      `SELECT ds.id, ds.doctor_id, ds.day_of_week, ds.appointment_type,
-              ds.start_time, ds.end_time, ds.max_appointments, ds.is_available,
-              $2::date AS schedule_date,
-              COALESCE(booked.booked_count, 0) AS booked_count,
-              GREATEST(ds.max_appointments - COALESCE(booked.booked_count, 0), 0) AS remaining_slots
-       FROM doctor_schedules ds
-       LEFT JOIN (
-         SELECT doctor_id, appointment_type, COUNT(*)::int AS booked_count
-         FROM appointments
-         WHERE doctor_id = $1
-           AND appointment_date = $2
-           AND status NOT IN ('cancelled', 'no_show')
-         GROUP BY doctor_id, appointment_type
-       ) booked
-         ON booked.doctor_id = ds.doctor_id
-        AND booked.appointment_type = ds.appointment_type
-       WHERE ds.doctor_id = $1
-         AND ds.day_of_week = $3
-         AND ds.is_available = true
-       ORDER BY ds.start_time ASC`,
-      [req.params.id, date, dayOfWeek],
+      `SELECT id, doctor_id, day_of_week, appointment_type,
+              start_time, end_time, max_appointments, is_available
+       FROM doctor_schedules
+       WHERE doctor_id = $1
+       ORDER BY
+         CASE day_of_week
+           WHEN 'Monday'    THEN 1
+           WHEN 'Tuesday'   THEN 2
+           WHEN 'Wednesday' THEN 3
+           WHEN 'Thursday'  THEN 4
+           WHEN 'Friday'    THEN 5
+           WHEN 'Saturday'  THEN 6
+           WHEN 'Sunday'    THEN 7
+         END,
+         start_time ASC`,
+      [req.params.id],
     );
 
     res.json({
       success: true,
       data: {
         doctor_id: Number(req.params.id),
-        date,
-        day_of_week: dayOfWeek,
         schedules: result.rows,
       },
     });
