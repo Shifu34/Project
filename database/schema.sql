@@ -199,6 +199,10 @@ ALTER TABLE departments
 -- =============================================================
 -- 10. DOCTOR_SCHEDULES
 -- =============================================================
+-- NOTE: Original schema had UNIQUE (doctor_id, day_of_week, appointment_type).
+--       Altered 2026-03-18: dropped that constraint, added UNIQUE (doctor_id, day_of_week, appointment_type, start_time).
+--       Altered 2026-03-24: dropped all unique constraints to allow multiple
+--       slots per day/type (each slot is its own independent row).
 CREATE TABLE doctor_schedules (
     id               SERIAL PRIMARY KEY,
     doctor_id        INT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
@@ -211,8 +215,8 @@ CREATE TABLE doctor_schedules (
     max_appointments INT DEFAULT 20,
     is_available     BOOLEAN DEFAULT TRUE,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (doctor_id, day_of_week, appointment_type)
+    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    -- No unique constraint: multiple slots per day/type are allowed
 );
 
 -- =============================================================

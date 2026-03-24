@@ -489,12 +489,6 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
         `INSERT INTO doctor_schedules
            (doctor_id, day_of_week, appointment_type, start_time, end_time, max_appointments, is_available)
          VALUES ($1, $2, $3, $4, $5, $6, true)
-         ON CONFLICT (doctor_id, day_of_week, appointment_type, start_time)
-         DO UPDATE SET
-           end_time = EXCLUDED.end_time,
-           max_appointments = EXCLUDED.max_appointments,
-           is_available = true,
-           updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
         [doctorId, normalizedDay, mappedType, start_time, end_time, maxAppointments],
       );
