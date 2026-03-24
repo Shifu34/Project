@@ -352,9 +352,6 @@ const getAppointmentCategories = async (_req, res, next) => {
         res.json({
             success: true,
             data: {
-                appointment_types: ['In-clinic Visit', 'Online Consultation'],
-                nature_of_visit: ['consultation', 'follow_up', 'emergency', 'procedure', 'checkup'],
-                statuses: ['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'],
                 doctor_specializations: result.rows.map((r) => r.specialization),
             },
         });
