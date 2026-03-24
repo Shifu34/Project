@@ -203,7 +203,9 @@ ALTER TABLE departments
 --       Altered 2026-03-18: dropped that constraint, added UNIQUE (doctor_id, day_of_week, appointment_type, start_time).
 --       Altered 2026-03-24: dropped all unique constraints to allow multiple
 --       slots per day/type (each slot is its own independent row).
-CREATE TABLE doctor_schedules (
+-- Migration (run once on existing DB):
+ALTER TABLE doctor_schedules DROP CONSTRAINT IF EXISTS doctor_schedules_doctor_day_type_key;
+CREATE TABLE IF NOT EXISTS doctor_schedules (
     id               SERIAL PRIMARY KEY,
     doctor_id        INT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
     day_of_week      VARCHAR(10) NOT NULL
