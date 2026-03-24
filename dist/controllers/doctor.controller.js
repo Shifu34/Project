@@ -228,17 +228,43 @@ const searchDoctors = async (req, res, next) => {
            COALESCE(u.last_name,  d.last_name)  AS last_name,
            COALESCE(u.email,      d.email)       AS email,
            COALESCE(u.phone,      d.phone)       AS phone,
-           dept.id AS department_id, dept.name AS department
+           dept.id AS department_id, dept.name AS department, dept.location
          ${baseJoin}
          ${where}
          ORDER BY COALESCE(u.first_name, d.first_name) ASC
          LIMIT $1 OFFSET $2`, dataParams),
             (0, database_1.query)(`SELECT COUNT(*) ${baseJoin} ${countWhere}`, countParams),
         ]);
+        // Fetch all available schedules for matched doctors
+        const doctorIds = dataRes.rows.map((r) => r.id);
+        let scheduleMap = {};
+        if (doctorIds.length > 0) {
+            const schedRes = await (0, database_1.query)(`SELECT id, doctor_id, day_of_week, appointment_type, start_time, end_time, max_appointments
+         FROM doctor_schedules
+         WHERE doctor_id = ANY($1::int[])
+           AND is_available = true
+         ORDER BY day_of_week, start_time`, [doctorIds]);
+            for (const row of schedRes.rows) {
+                if (!scheduleMap[row.doctor_id])
+                    scheduleMap[row.doctor_id] = [];
+                scheduleMap[row.doctor_id].push({
+                    schedule_id: row.id,
+                    day_of_week: row.day_of_week,
+                    dates: [],
+                    start_time: row.start_time,
+                    end_time: row.end_time,
+                    appointment_type: row.appointment_type,
+                    max_appointments: row.max_appointments,
+                });
+            }
+        }
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({
             success: true,
-            data: dataRes.rows,
+            data: dataRes.rows.map((doc) => ({
+                ...doc,
+                available_schedules: scheduleMap[doc.id] || [],
+            })),
             pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
         });
     }
