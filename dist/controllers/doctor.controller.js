@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getDoctorBookedAppointments = exports.deleteDoctorSchedule = exports.updateDoctorSchedule = exports.getDoctorAvailableSlots = exports.addDoctorSchedule = exports.upsertDoctorProfileByDoctor = exports.getDoctorScheduleByDate = exports.getDoctorProfile = exports.searchDoctors = exports.getDoctorAppointments = exports.updateDoctor = exports.createDoctor = exports.getDoctorByUserId = exports.getDoctorById = exports.getDoctors = void 0;
+exports.getDoctorBookedAppointments = exports.deleteDoctorSchedule = exports.updateDoctorSchedule = exports.getDoctorAvailableSlots = exports.addDoctorSchedule = exports.upsertDoctorProfileByDoctor = exports.getDoctorScheduleByDate = exports.getDoctorProfile = exports.searchAvailableDoctors = exports.searchDoctors = exports.getDoctorAppointments = exports.updateDoctor = exports.createDoctor = exports.getDoctorByUserId = exports.getDoctorById = exports.getDoctors = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 const canDoctorManageProfile = async (req, doctorId) => {
@@ -247,6 +247,123 @@ const searchDoctors = async (req, res, next) => {
     }
 };
 exports.searchDoctors = searchDoctors;
+// GET /doctors/search-available?dates=2026-03-25,2026-03-27&category=Cardiologist&location=...&name=...&department=...
+const searchAvailableDoctors = async (req, res, next) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const offset = (page - 1) * limit;
+        const name = (req.query.name || '').trim();
+        const category = (req.query.category || '').trim();
+        const department = (req.query.department || '').trim();
+        const location = (req.query.location || '').trim();
+        // Accept dates as comma-separated string or repeated param: dates=2026-03-25,2026-03-27
+        const rawDates = req.query.dates;
+        let dateList = [];
+        if (Array.isArray(rawDates)) {
+            dateList = rawDates.flatMap(d => d.split(','));
+        }
+        else if (rawDates) {
+            dateList = rawDates.split(',');
+        }
+        dateList = dateList.map(d => d.trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+        // Convert dates → unique day-of-week names
+        const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const dayOfWeekList = [...new Set(dateList.map(d => DAY_NAMES[new Date(`${d}T00:00:00`).getDay()]))];
+        const dataConditions = ['d.is_active = true'];
+        const dataParams = [limit, offset];
+        let dataIdx = 3;
+        const countConditions = ['d.is_active = true'];
+        const countParams = [];
+        let countIdx = 1;
+        // Must have an available schedule on one of the requested days
+        if (dayOfWeekList.length > 0) {
+            const clause = `EXISTS (
+        SELECT 1 FROM doctor_schedules ds
+        WHERE ds.doctor_id = d.id
+          AND ds.is_available = true
+          AND ds.day_of_week = ANY($${dataIdx}::text[])
+      )`;
+            dataConditions.push(clause);
+            dataParams.push(dayOfWeekList);
+            dataIdx++;
+            const cClause = `EXISTS (
+        SELECT 1 FROM doctor_schedules ds
+        WHERE ds.doctor_id = d.id
+          AND ds.is_available = true
+          AND ds.day_of_week = ANY($${countIdx}::text[])
+      )`;
+            countConditions.push(cClause);
+            countParams.push(dayOfWeekList);
+            countIdx++;
+        }
+        if (name) {
+            const clause = `CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${dataIdx}`;
+            dataConditions.push(clause);
+            dataParams.push(`%${name}%`);
+            dataIdx++;
+            const cClause = `CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${countIdx}`;
+            countConditions.push(cClause);
+            countParams.push(`%${name}%`);
+            countIdx++;
+        }
+        if (category) {
+            dataConditions.push(`d.specialization ILIKE $${dataIdx}`);
+            dataParams.push(`%${category}%`);
+            dataIdx++;
+            countConditions.push(`d.specialization ILIKE $${countIdx}`);
+            countParams.push(`%${category}%`);
+            countIdx++;
+        }
+        if (department) {
+            dataConditions.push(`dept.name ILIKE $${dataIdx}`);
+            dataParams.push(`%${department}%`);
+            dataIdx++;
+            countConditions.push(`dept.name ILIKE $${countIdx}`);
+            countParams.push(`%${department}%`);
+            countIdx++;
+        }
+        if (location) {
+            dataConditions.push(`dept.location ILIKE $${dataIdx}`);
+            dataParams.push(`%${location}%`);
+            dataIdx++;
+            countConditions.push(`dept.location ILIKE $${countIdx}`);
+            countParams.push(`%${location}%`);
+            countIdx++;
+        }
+        const where = `WHERE ${dataConditions.join(' AND ')}`;
+        const countWhere = `WHERE ${countConditions.join(' AND ')}`;
+        const baseJoin = `
+      FROM doctors d
+      LEFT JOIN users u         ON u.id    = d.user_id
+      LEFT JOIN departments dept ON dept.id = d.department_id`;
+        const [dataRes, countRes] = await Promise.all([
+            (0, database_1.query)(`SELECT
+           d.id, d.specialization, d.qualification, d.experience_years,
+           d.consultation_fee, d.is_active,
+           COALESCE(u.first_name, d.first_name) AS first_name,
+           COALESCE(u.last_name,  d.last_name)  AS last_name,
+           COALESCE(u.email,      d.email)       AS email,
+           COALESCE(u.phone,      d.phone)       AS phone,
+           dept.id AS department_id, dept.name AS department, dept.location
+         ${baseJoin}
+         ${where}
+         ORDER BY COALESCE(u.first_name, d.first_name) ASC
+         LIMIT $1 OFFSET $2`, dataParams),
+            (0, database_1.query)(`SELECT COUNT(*) ${baseJoin} ${countWhere}`, countParams),
+        ]);
+        const total = parseInt(countRes.rows[0].count, 10);
+        res.json({
+            success: true,
+            data: dataRes.rows,
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.searchAvailableDoctors = searchAvailableDoctors;
 // GET /doctors/:id/profile
 const getDoctorProfile = async (req, res, next) => {
     try {

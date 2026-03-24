@@ -286,6 +286,139 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
   }
 };
 
+// GET /doctors/search-available?dates=2026-03-25,2026-03-27&category=Cardiologist&location=...&name=...&department=...
+export const searchAvailableDoctors = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const page       = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
+    const limit      = Math.min(100, parseInt(req.query.limit as string || '20', 10));
+    const offset     = (page - 1) * limit;
+
+    const name       = (req.query.name       as string || '').trim();
+    const category   = (req.query.category   as string || '').trim();
+    const department = (req.query.department as string || '').trim();
+    const location   = (req.query.location   as string || '').trim();
+
+    // Accept dates as comma-separated string or repeated param: dates=2026-03-25,2026-03-27
+    const rawDates = req.query.dates as string | string[] | undefined;
+    let dateList: string[] = [];
+    if (Array.isArray(rawDates)) {
+      dateList = rawDates.flatMap(d => d.split(','));
+    } else if (rawDates) {
+      dateList = rawDates.split(',');
+    }
+    dateList = dateList.map(d => d.trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+    // Convert dates → unique day-of-week names
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeekList = [...new Set(dateList.map(d => DAY_NAMES[new Date(`${d}T00:00:00`).getDay()]))];
+
+    const dataConditions: string[]  = ['d.is_active = true'];
+    const dataParams: unknown[]     = [limit, offset];
+    let dataIdx = 3;
+
+    const countConditions: string[] = ['d.is_active = true'];
+    const countParams: unknown[]    = [];
+    let countIdx = 1;
+
+    // Must have an available schedule on one of the requested days
+    if (dayOfWeekList.length > 0) {
+      const clause = `EXISTS (
+        SELECT 1 FROM doctor_schedules ds
+        WHERE ds.doctor_id = d.id
+          AND ds.is_available = true
+          AND ds.day_of_week = ANY($${dataIdx}::text[])
+      )`;
+      dataConditions.push(clause);
+      dataParams.push(dayOfWeekList);
+      dataIdx++;
+
+      const cClause = `EXISTS (
+        SELECT 1 FROM doctor_schedules ds
+        WHERE ds.doctor_id = d.id
+          AND ds.is_available = true
+          AND ds.day_of_week = ANY($${countIdx}::text[])
+      )`;
+      countConditions.push(cClause);
+      countParams.push(dayOfWeekList);
+      countIdx++;
+    }
+
+    if (name) {
+      const clause = `CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${dataIdx}`;
+      dataConditions.push(clause);
+      dataParams.push(`%${name}%`);
+      dataIdx++;
+      const cClause = `CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${countIdx}`;
+      countConditions.push(cClause);
+      countParams.push(`%${name}%`);
+      countIdx++;
+    }
+
+    if (category) {
+      dataConditions.push(`d.specialization ILIKE $${dataIdx}`);
+      dataParams.push(`%${category}%`);
+      dataIdx++;
+      countConditions.push(`d.specialization ILIKE $${countIdx}`);
+      countParams.push(`%${category}%`);
+      countIdx++;
+    }
+
+    if (department) {
+      dataConditions.push(`dept.name ILIKE $${dataIdx}`);
+      dataParams.push(`%${department}%`);
+      dataIdx++;
+      countConditions.push(`dept.name ILIKE $${countIdx}`);
+      countParams.push(`%${department}%`);
+      countIdx++;
+    }
+
+    if (location) {
+      dataConditions.push(`dept.location ILIKE $${dataIdx}`);
+      dataParams.push(`%${location}%`);
+      dataIdx++;
+      countConditions.push(`dept.location ILIKE $${countIdx}`);
+      countParams.push(`%${location}%`);
+      countIdx++;
+    }
+
+    const where      = `WHERE ${dataConditions.join(' AND ')}`;
+    const countWhere = `WHERE ${countConditions.join(' AND ')}`;
+
+    const baseJoin = `
+      FROM doctors d
+      LEFT JOIN users u         ON u.id    = d.user_id
+      LEFT JOIN departments dept ON dept.id = d.department_id`;
+
+    const [dataRes, countRes] = await Promise.all([
+      query(
+        `SELECT
+           d.id, d.specialization, d.qualification, d.experience_years,
+           d.consultation_fee, d.is_active,
+           COALESCE(u.first_name, d.first_name) AS first_name,
+           COALESCE(u.last_name,  d.last_name)  AS last_name,
+           COALESCE(u.email,      d.email)       AS email,
+           COALESCE(u.phone,      d.phone)       AS phone,
+           dept.id AS department_id, dept.name AS department, dept.location
+         ${baseJoin}
+         ${where}
+         ORDER BY COALESCE(u.first_name, d.first_name) ASC
+         LIMIT $1 OFFSET $2`,
+        dataParams,
+      ),
+      query(`SELECT COUNT(*) ${baseJoin} ${countWhere}`, countParams),
+    ]);
+
+    const total = parseInt(countRes.rows[0].count, 10);
+    res.json({
+      success: true,
+      data: dataRes.rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // GET /doctors/:id/profile
 export const getDoctorProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {

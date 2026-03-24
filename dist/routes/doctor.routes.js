@@ -41,6 +41,7 @@ const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 router.get('/search', doctorCtrl.searchDoctors);
+router.get('/search-available', doctorCtrl.searchAvailableDoctors);
 router.get('/', doctorCtrl.getDoctors);
 router.get('/me', doctorCtrl.getDoctorByUserId);
 router.get('/:id/profile', doctorCtrl.getDoctorProfile);

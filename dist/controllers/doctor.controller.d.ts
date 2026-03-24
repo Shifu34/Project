@@ -7,6 +7,7 @@ export declare const createDoctor: (req: Request, res: Response, next: NextFunct
 export declare const updateDoctor: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getDoctorAppointments: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const searchDoctors: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const searchAvailableDoctors: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getDoctorProfile: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getDoctorScheduleByDate: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const upsertDoctorProfileByDoctor: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;

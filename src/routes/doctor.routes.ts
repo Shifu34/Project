@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/search', doctorCtrl.searchDoctors);
+router.get('/search-available', doctorCtrl.searchAvailableDoctors);
 router.get('/',    doctorCtrl.getDoctors);
 router.get('/me',  doctorCtrl.getDoctorByUserId);
 router.get('/:id/profile', doctorCtrl.getDoctorProfile);
