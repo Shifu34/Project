@@ -262,3 +262,155 @@ export const getMyAppointments = async (req: AuthRequest, res: Response, next: N
     next(err);
   }
 };
+
+// GET /appointments/upcoming?days=7  — next 1 upcoming appointment
+export const getUpcomingAppointment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId   = req.user!.userId;
+    const roleName = req.user!.roleName;
+    const days = Math.max(1, Math.min(365, parseInt(req.query.days as string || '7', 10)));
+
+    let ownerCondition: string;
+    let ownerParam: unknown;
+
+    if (roleName === 'patient') {
+      const patientRes = await query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
+      if (patientRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Patient profile not found' });
+        return;
+      }
+      ownerCondition = 'a.patient_id = $1';
+      ownerParam = patientRes.rows[0].id;
+    } else if (roleName === 'doctor') {
+      const doctorRes = await query(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [userId]);
+      if (doctorRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Doctor profile not found' });
+        return;
+      }
+      ownerCondition = 'a.doctor_id = $1';
+      ownerParam = doctorRes.rows[0].id;
+    } else {
+      res.status(403).json({ success: false, message: 'Only patients and doctors can use this endpoint' });
+      return;
+    }
+
+    const result = await query(
+      `SELECT
+         a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
+         a.appointment_type, a.nature_of_visit, a.status, a.reason, a.notes,
+         a.created_at,
+         CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
+         doc.id AS doctor_id,
+         CONCAT(doc.first_name,' ',doc.last_name) AS doctor_name,
+         doc.specialization, doc.consultation_fee,
+         dept.name AS department
+       FROM appointments a
+       JOIN patients p   ON p.id   = a.patient_id
+       JOIN doctors doc  ON doc.id = a.doctor_id
+       LEFT JOIN departments dept ON dept.id = a.department_id
+       WHERE ${ownerCondition}
+         AND a.appointment_date >= CURRENT_DATE
+         AND a.appointment_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
+         AND a.status NOT IN ('cancelled', 'no_show')
+       ORDER BY a.appointment_date ASC, a.appointment_time ASC
+       LIMIT 1`,
+      [ownerParam, days],
+    );
+
+    res.json({ success: true, data: result.rows[0] || null });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /appointments/:id  — partial update (any subset of fields)
+export const patchAppointment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const allowed = [
+      'appointment_date', 'appointment_time', 'duration_minutes',
+      'appointment_type', 'nature_of_visit', 'reason', 'notes',
+      'patient_id', 'doctor_id', 'department_id',
+    ];
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    for (const field of allowed) {
+      if (req.body[field] !== undefined) {
+        sets.push(`${field} = $${idx++}`);
+        params.push(req.body[field]);
+      }
+    }
+
+    if (sets.length === 0) {
+      res.status(400).json({ success: false, message: 'No valid fields provided to update' });
+      return;
+    }
+
+    sets.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(req.params.id);
+
+    const result = await query(
+      `UPDATE appointments SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
+      params,
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Appointment not found' });
+      return;
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /appointments/:id/cancel
+export const cancelAppointment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { cancellation_reason } = req.body;
+    const cancelledBy = req.user?.userId;
+
+    const result = await query(
+      `UPDATE appointments
+       SET status = 'cancelled',
+           cancelled_by = $1,
+           cancellation_reason = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+         AND status NOT IN ('cancelled', 'completed', 'no_show')
+       RETURNING *`,
+      [cancelledBy ?? null, cancellation_reason ?? null, req.params.id],
+    );
+
+    if (result.rows.length === 0) {
+      const exists = await query(`SELECT status FROM appointments WHERE id = $1`, [req.params.id]);
+      if (exists.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Appointment not found' });
+      } else {
+        res.status(409).json({ success: false, message: `Cannot cancel appointment with status: ${exists.rows[0].status}` });
+      }
+      return;
+    }
+
+    res.json({ success: true, message: 'Appointment cancelled successfully', data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /appointments/categories  — static enum values for dropdowns
+export const getAppointmentCategories = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        appointment_types: ['In-clinic Visit', 'Online Consultation'],
+        nature_of_visit:   ['consultation', 'follow_up', 'emergency', 'procedure', 'checkup'],
+        statuses:          ['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'],
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

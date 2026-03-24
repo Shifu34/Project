@@ -1,6 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../config/database';
 
+// GET /departments/locations  — distinct location values
+export const getDepartmentLocations = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await query(
+      `SELECT DISTINCT location FROM departments
+       WHERE location IS NOT NULL AND location != ''
+       ORDER BY location ASC`,
+    );
+    res.json({ success: true, data: result.rows.map((r: { location: string }) => r.location) });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // GET /departments
 export const getDepartments = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {

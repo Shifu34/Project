@@ -13,6 +13,7 @@ router.get('/',    doctorCtrl.getDoctors);
 router.get('/me',  doctorCtrl.getDoctorByUserId);
 router.get('/:id/profile', doctorCtrl.getDoctorProfile);
 router.get('/:id/schedule', doctorCtrl.getDoctorScheduleByDate);
+router.get('/:id/available-slots', doctorCtrl.getDoctorAvailableSlots);
 router.get('/:id/booked-appointments', doctorCtrl.getDoctorBookedAppointments);
 router.get('/:id', doctorCtrl.getDoctorById);
 router.get('/:id/appointments', doctorCtrl.getDoctorAppointments);
@@ -44,6 +45,11 @@ router.post('/:id/schedule',
 router.delete('/schedule/:scheduleId',
   authorize('admin', 'doctor'),
   doctorCtrl.deleteDoctorSchedule,
+);
+
+router.patch('/schedule/:scheduleId',
+  authorize('admin', 'doctor'),
+  doctorCtrl.updateDoctorSchedule,
 );
 
 export default router;

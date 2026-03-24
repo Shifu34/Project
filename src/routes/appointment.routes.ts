@@ -8,8 +8,11 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/me',              apptCtrl.getMyAppointments);
-router.get('/:id',             apptCtrl.getAppointmentById);
+// Fixed path routes first (before /:id)
+router.get('/me',         apptCtrl.getMyAppointments);
+router.get('/upcoming',   apptCtrl.getUpcomingAppointment);
+router.get('/categories', apptCtrl.getAppointmentCategories);
+router.get('/:id',        apptCtrl.getAppointmentById);
 
 router.post('/',
   authorize('admin', 'doctor', 'patient'),
@@ -19,6 +22,16 @@ router.post('/',
   body('appointment_time').matches(/^\d{2}:\d{2}$/),
   validate,
   apptCtrl.createAppointment,
+);
+
+router.patch('/:id/cancel',
+  authorize('admin', 'doctor', 'patient'),
+  apptCtrl.cancelAppointment,
+);
+
+router.patch('/:id',
+  authorize('admin', 'doctor', 'patient'),
+  apptCtrl.patchAppointment,
 );
 
 router.put('/:id', authorize('admin', 'doctor'), validate, apptCtrl.updateAppointment);

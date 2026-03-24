@@ -8,6 +8,7 @@ const router = Router();
 
 router.use(authenticate);
 
+router.get('/locations', deptCtrl.getDepartmentLocations);
 router.get('/',    deptCtrl.getDepartments);
 router.get('/:id', deptCtrl.getDepartmentById);
 

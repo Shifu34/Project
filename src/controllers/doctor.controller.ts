@@ -515,6 +515,123 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
   }
 };
 
+// GET /doctors/:id/available-slots?date=YYYY-MM-DD
+export const getDoctorAvailableSlots = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const doctorId = req.params.id;
+    const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+
+    const d = new Date(`${date}T00:00:00`);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeek = dayNames[d.getDay()];
+
+    const [scheduleRes, bookedRes] = await Promise.all([
+      query(
+        `SELECT id, appointment_type, start_time, end_time
+         FROM doctor_schedules
+         WHERE doctor_id = $1 AND day_of_week = $2 AND is_available = true`,
+        [doctorId, dayOfWeek],
+      ),
+      query(
+        `SELECT appointment_time, appointment_type
+         FROM appointments
+         WHERE doctor_id = $1 AND appointment_date = $2
+           AND status NOT IN ('cancelled', 'no_show')`,
+        [doctorId, date],
+      ),
+    ]);
+
+    const bookedTimes = new Set(
+      bookedRes.rows.map(r => `${r.appointment_type}:${String(r.appointment_time).slice(0, 5)}`),
+    );
+
+    const availableSlots: { schedule_id: number; appointment_type: string; time: string }[] = [];
+
+    for (const sched of scheduleRes.rows) {
+      const [sh, sm] = String(sched.start_time).split(':').map(Number);
+      const [eh, em] = String(sched.end_time).split(':').map(Number);
+      let current = sh * 60 + sm;
+      const end = eh * 60 + em;
+
+      while (current + 30 <= end) {
+        const hh = String(Math.floor(current / 60)).padStart(2, '0');
+        const mm = String(current % 60).padStart(2, '0');
+        const timeStr = `${hh}:${mm}`;
+        if (!bookedTimes.has(`${sched.appointment_type}:${timeStr}`)) {
+          availableSlots.push({ schedule_id: sched.id, appointment_type: sched.appointment_type, time: timeStr });
+        }
+        current += 30;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: { doctor_id: Number(doctorId), date, day_of_week: dayOfWeek, available_slots: availableSlots },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /doctors/schedule/:scheduleId  — partial update by schedule id
+export const updateDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const scheduleId = parseInt(req.params.scheduleId, 10);
+
+    const scheduleRes = await query(`SELECT * FROM doctor_schedules WHERE id = $1`, [scheduleId]);
+    if (scheduleRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Schedule not found' });
+      return;
+    }
+
+    const doctorId = scheduleRes.rows[0].doctor_id;
+    const allowed = await canDoctorManageProfile(req, doctorId);
+    if (!allowed) {
+      res.status(403).json({ success: false, message: 'You can only update your own schedule' });
+      return;
+    }
+
+    const typeMap: Record<string, string> = {
+      clinic: 'In-clinic Visit',
+      online: 'Online Consultation',
+      'in-clinic visit': 'In-clinic Visit',
+      'online consultation': 'Online Consultation',
+    };
+
+    const allowedFields = ['day_of_week', 'appointment_type', 'start_time', 'end_time', 'max_appointments', 'is_available'];
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        let val: unknown = req.body[field];
+        if (field === 'appointment_type') val = typeMap[String(val).toLowerCase()] ?? val;
+        if (field === 'day_of_week') val = String(val).charAt(0).toUpperCase() + String(val).slice(1).toLowerCase();
+        sets.push(`${field} = $${idx++}`);
+        params.push(val);
+      }
+    }
+
+    if (sets.length === 0) {
+      res.status(400).json({ success: false, message: 'No valid fields provided to update' });
+      return;
+    }
+
+    sets.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(scheduleId);
+
+    const result = await query(
+      `UPDATE doctor_schedules SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
+      params,
+    );
+
+    res.json({ success: true, message: 'Schedule updated successfully', data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // DELETE /doctors/schedule/:scheduleId
 export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
