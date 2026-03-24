@@ -267,9 +267,13 @@ const searchAvailableDoctors = async (req, res, next) => {
             dateList = rawDates.split(',');
         }
         dateList = dateList.map(d => d.trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
-        // Convert dates → unique day-of-week names
+        // Convert dates → unique day-of-week names, keep a date→day map for response
         const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const dayOfWeekList = [...new Set(dateList.map(d => DAY_NAMES[new Date(`${d}T00:00:00`).getDay()]))];
+        const dateToDayMap = {};
+        for (const d of dateList) {
+            dateToDayMap[d] = DAY_NAMES[new Date(`${d}T00:00:00`).getDay()];
+        }
+        const dayOfWeekList = [...new Set(Object.values(dateToDayMap))];
         const dataConditions = ['d.is_active = true'];
         const dataParams = [limit, offset];
         let dataIdx = 3;
@@ -352,10 +356,40 @@ const searchAvailableDoctors = async (req, res, next) => {
          LIMIT $1 OFFSET $2`, dataParams),
             (0, database_1.query)(`SELECT COUNT(*) ${baseJoin} ${countWhere}`, countParams),
         ]);
+        // Fetch schedules for all matched doctors on the requested days
+        const doctorIds = dataRes.rows.map((r) => r.id);
+        let scheduleMap = {};
+        if (doctorIds.length > 0 && dayOfWeekList.length > 0) {
+            const schedRes = await (0, database_1.query)(`SELECT id, doctor_id, day_of_week, appointment_type, start_time, end_time, max_appointments
+         FROM doctor_schedules
+         WHERE doctor_id = ANY($1::int[])
+           AND is_available = true
+           AND day_of_week = ANY($2::text[])
+         ORDER BY day_of_week, start_time`, [doctorIds, dayOfWeekList]);
+            for (const row of schedRes.rows) {
+                if (!scheduleMap[row.doctor_id])
+                    scheduleMap[row.doctor_id] = [];
+                // Find the matching dates for this day_of_week
+                const matchingDates = dateList.filter(d => dateToDayMap[d] === row.day_of_week);
+                scheduleMap[row.doctor_id].push({
+                    schedule_id: row.id,
+                    day_of_week: row.day_of_week,
+                    dates: matchingDates,
+                    start_time: row.start_time,
+                    end_time: row.end_time,
+                    appointment_type: row.appointment_type,
+                    max_appointments: row.max_appointments,
+                });
+            }
+        }
         const total = parseInt(countRes.rows[0].count, 10);
+        const doctors = dataRes.rows.map((doc) => ({
+            ...doc,
+            available_schedules: scheduleMap[doc.id] || [],
+        }));
         res.json({
             success: true,
-            data: dataRes.rows,
+            data: doctors,
             pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
         });
     }
