@@ -228,6 +228,22 @@ const getUpcomingAppointment = async (req, res, next) => {
         const userId = req.user.userId;
         const roleName = req.user.roleName;
         const days = Math.max(1, Math.min(365, parseInt(req.query.days || '7', 10)));
+        // current_time: ISO timestamp from client e.g. "2026-03-25T14:30:00Z"
+        // Allows Pakistan clients (UTC+5) to pass their local time converted to UTC
+        // Falls back to server UTC if not provided
+        let currentDate;
+        let currentTime;
+        const tsParam = (req.query.current_time || '').trim();
+        const tsDate = tsParam ? new Date(tsParam) : null;
+        if (tsDate && !isNaN(tsDate.getTime())) {
+            currentDate = tsDate.toISOString().split('T')[0];
+            currentTime = tsDate.toISOString().split('T')[1].slice(0, 8); // HH:mm:ss
+        }
+        else {
+            const now = new Date();
+            currentDate = now.toISOString().split('T')[0];
+            currentTime = now.toISOString().split('T')[1].slice(0, 8);
+        }
         let ownerCondition;
         let ownerParam;
         if (roleName === 'patient') {
@@ -267,11 +283,12 @@ const getUpcomingAppointment = async (req, res, next) => {
        LEFT JOIN departments dept ON dept.id = a.department_id
        LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
        WHERE ${ownerCondition}
-         AND a.appointment_date >= CURRENT_DATE
-         AND a.appointment_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
+         AND (a.appointment_date > $3::date
+              OR (a.appointment_date = $3::date AND a.appointment_time >= $4::time))
+         AND a.appointment_date <= $3::date + ($2 || ' days')::INTERVAL
          AND a.status NOT IN ('cancelled', 'no_show')
        ORDER BY a.appointment_date ASC, a.appointment_time ASC
-       LIMIT 1`, [ownerParam, days]);
+       LIMIT 1`, [ownerParam, days, currentDate, currentTime]);
         res.json({ success: true, data: result.rows[0] || null });
     }
     catch (err) {

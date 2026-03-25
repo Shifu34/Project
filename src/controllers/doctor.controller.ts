@@ -725,18 +725,10 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const dayOfWeek = dayNames[d.getDay()];
 
-    // current_time param: explicit UTC time from client e.g. "14:30"
-    // Falls back to server UTC time if not provided
     let currentMinutes = 0;
     const isToday = date === todayUTC;
     if (isToday) {
-      const timeParam = (req.query.current_time as string || '').trim();
-      if (/^\d{2}:\d{2}$/.test(timeParam)) {
-        const [h, m] = timeParam.split(':').map(Number);
-        currentMinutes = h * 60 + m;
-      } else {
-        currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-      }
+      currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
     }
 
     const [scheduleRes, bookedRes] = await Promise.all([
