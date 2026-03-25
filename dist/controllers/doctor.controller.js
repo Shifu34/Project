@@ -618,10 +618,14 @@ exports.addDoctorSchedule = addDoctorSchedule;
 const getDoctorAvailableSlots = async (req, res, next) => {
     try {
         const doctorId = req.params.id;
-        const date = req.query.date || new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const date = req.query.date || now.toISOString().split('T')[0];
         const d = new Date(`${date}T00:00:00`);
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const dayOfWeek = dayNames[d.getDay()];
+        // If the requested date is today, filter out slots already in the past
+        const isToday = date === now.toISOString().split('T')[0];
+        const currentMinutes = isToday ? now.getHours() * 60 + now.getMinutes() : 0;
         const [scheduleRes, bookedRes] = await Promise.all([
             (0, database_1.query)(`SELECT id, appointment_type, start_time, end_time
          FROM doctor_schedules
@@ -640,6 +644,11 @@ const getDoctorAvailableSlots = async (req, res, next) => {
             let current = sh * 60 + sm;
             const end = eh * 60 + em;
             while (current + 30 <= end) {
+                // Skip slots already in the past when date is today
+                if (isToday && current <= currentMinutes) {
+                    current += 30;
+                    continue;
+                }
                 const hh = String(Math.floor(current / 60)).padStart(2, '0');
                 const mm = String(current % 60).padStart(2, '0');
                 const timeStr = `${hh}:${mm}`;

@@ -717,11 +717,16 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
 export const getDoctorAvailableSlots = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const doctorId = req.params.id;
-    const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const date = (req.query.date as string) || now.toISOString().split('T')[0];
 
     const d = new Date(`${date}T00:00:00`);
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const dayOfWeek = dayNames[d.getDay()];
+
+    // If the requested date is today, filter out slots already in the past
+    const isToday = date === now.toISOString().split('T')[0];
+    const currentMinutes = isToday ? now.getHours() * 60 + now.getMinutes() : 0;
 
     const [scheduleRes, bookedRes] = await Promise.all([
       query(
@@ -753,6 +758,11 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
       const end = eh * 60 + em;
 
       while (current + 30 <= end) {
+        // Skip slots already in the past when date is today
+        if (isToday && current <= currentMinutes) {
+          current += 30;
+          continue;
+        }
         const hh = String(Math.floor(current / 60)).padStart(2, '0');
         const mm = String(current % 60).padStart(2, '0');
         const timeStr = `${hh}:${mm}`;
