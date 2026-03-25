@@ -77,7 +77,7 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
   try {
     const {
       patient_id, doctor_id, department_id, appointment_date, appointment_time,
-      duration_minutes, appointment_type, nature_of_visit, reason, notes,
+      duration_minutes, appointment_type, nature_of_visit_id, reason, notes,
     } = req.body;
 
     const bookedBy = (req as Request & { user?: { userId: number } }).user?.userId;
@@ -97,10 +97,10 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
     const result = await query(
       `INSERT INTO appointments
          (patient_id, doctor_id, department_id, appointment_date, appointment_time,
-          duration_minutes, appointment_type, nature_of_visit, reason, notes, booked_by)
+          duration_minutes, appointment_type, nature_of_visit_id, reason, notes, booked_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [patient_id, doctor_id, department_id, appointment_date, appointment_time,
-       duration_minutes || 30, appointment_type || 'Online Consultation', nature_of_visit, reason, notes, bookedBy],
+       duration_minutes || 30, appointment_type || 'Online Consultation', nature_of_visit_id || null, reason, notes, bookedBy],
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -139,15 +139,15 @@ export const updateAppointment = async (req: Request, res: Response, next: NextF
   try {
     const {
       appointment_date, appointment_time, duration_minutes,
-      appointment_type, nature_of_visit, reason, notes,
+      appointment_type, nature_of_visit_id, reason, notes,
     } = req.body;
 
     const result = await query(
       `UPDATE appointments
        SET appointment_date=$1, appointment_time=$2, duration_minutes=$3,
-           appointment_type=$4, nature_of_visit=$5, reason=$6, notes=$7
+           appointment_type=$4, nature_of_visit_id=$5, reason=$6, notes=$7
        WHERE id = $8 RETURNING *`,
-      [appointment_date, appointment_time, duration_minutes, appointment_type, nature_of_visit, reason, notes, req.params.id],
+      [appointment_date, appointment_time, duration_minutes, appointment_type, nature_of_visit_id, reason, notes, req.params.id],
     );
 
     if (result.rows.length === 0) {
@@ -230,7 +230,7 @@ export const getMyAppointments = async (req: AuthRequest, res: Response, next: N
       query(
         `SELECT
            a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
-           a.appointment_type, a.nature_of_visit, a.status, a.reason, a.notes,
+           a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason, a.notes,
            a.cancellation_reason, a.created_at,
            CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code, p.phone AS patient_phone,
            doc.id AS doctor_id,
@@ -241,6 +241,7 @@ export const getMyAppointments = async (req: AuthRequest, res: Response, next: N
          JOIN patients p   ON p.id   = a.patient_id
          JOIN doctors doc  ON doc.id = a.doctor_id
          LEFT JOIN departments dept ON dept.id = a.department_id
+         LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
          ${where}
          ORDER BY a.appointment_date DESC, a.appointment_time DESC
          LIMIT $1 OFFSET $2`,
@@ -297,7 +298,7 @@ export const getUpcomingAppointment = async (req: AuthRequest, res: Response, ne
     const result = await query(
       `SELECT
          a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
-         a.appointment_type, a.nature_of_visit, a.status, a.reason, a.notes,
+         a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason, a.notes,
          a.created_at,
          CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
          doc.id AS doctor_id,
@@ -308,6 +309,7 @@ export const getUpcomingAppointment = async (req: AuthRequest, res: Response, ne
        JOIN patients p   ON p.id   = a.patient_id
        JOIN doctors doc  ON doc.id = a.doctor_id
        LEFT JOIN departments dept ON dept.id = a.department_id
+       LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
        WHERE ${ownerCondition}
          AND a.appointment_date >= CURRENT_DATE
          AND a.appointment_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
@@ -328,7 +330,7 @@ export const patchAppointment = async (req: AuthRequest, res: Response, next: Ne
   try {
     const allowed = [
       'appointment_date', 'appointment_time', 'duration_minutes',
-      'appointment_type', 'nature_of_visit', 'reason', 'notes',
+      'appointment_type', 'nature_of_visit_id', 'reason', 'notes',
       'status', 'patient_id', 'doctor_id', 'department_id',
     ];
     const sets: string[] = [];

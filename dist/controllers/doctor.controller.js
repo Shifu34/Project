@@ -737,12 +737,13 @@ const getDoctorBookedAppointments = async (req, res, next) => {
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
         const result = await (0, database_1.query)(`SELECT a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
-              a.appointment_type, a.nature_of_visit, a.status, a.reason,
+              a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason,
               p.id AS patient_id,
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.patient_code, p.phone AS patient_phone
        FROM appointments a
        JOIN patients p ON p.id = a.patient_id
+       LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
        WHERE a.doctor_id = $1
          AND a.appointment_date = $2
          AND a.status NOT IN ('cancelled', 'no_show')

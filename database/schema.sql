@@ -245,8 +245,7 @@ CREATE TABLE appointments (
     duration_minutes    INT DEFAULT 30,
     appointment_type    VARCHAR(30) NOT NULL DEFAULT 'Online Consultation'
                             CHECK (appointment_type IN ('In-clinic Visit','Online Consultation')),
-    nature_of_visit     VARCHAR(30) CHECK (nature_of_visit IN
-                            ('consultation','follow_up','emergency','procedure','checkup')),
+    nature_of_visit_id   INT REFERENCES nature_of_visit(id) ON DELETE SET NULL,
     status              VARCHAR(20) DEFAULT 'scheduled'
                             CHECK (status IN ('scheduled','confirmed','in_progress','completed','cancelled','no_show')),
     reason              TEXT,
