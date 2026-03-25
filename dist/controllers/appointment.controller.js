@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAppointmentCategories = exports.cancelAppointment = exports.patchAppointment = exports.getUpcomingAppointment = exports.getMyAppointments = exports.updateAppointment = exports.updateAppointmentStatus = exports.createAppointment = exports.getAppointmentById = exports.getAppointments = void 0;
+exports.getNatureOfVisits = exports.getAppointmentCategories = exports.cancelAppointment = exports.patchAppointment = exports.getUpcomingAppointment = exports.getMyAppointments = exports.updateAppointment = exports.updateAppointmentStatus = exports.createAppointment = exports.getAppointmentById = exports.getAppointments = void 0;
 const database_1 = require("../config/database");
 // GET /appointments
 const getAppointments = async (req, res, next) => {
@@ -363,4 +363,18 @@ const getAppointmentCategories = async (_req, res, next) => {
     }
 };
 exports.getAppointmentCategories = getAppointmentCategories;
+// GET /appointments/nature-of-visits
+const getNatureOfVisits = async (_req, res, next) => {
+    try {
+        const result = await (0, database_1.query)(`SELECT id, name, description
+       FROM nature_of_visit
+       WHERE is_active = true
+       ORDER BY name ASC`);
+        res.json({ success: true, data: result.rows });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getNatureOfVisits = getNatureOfVisits;
 //# sourceMappingURL=appointment.controller.js.map

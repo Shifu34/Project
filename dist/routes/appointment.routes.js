@@ -44,6 +44,7 @@ router.use(auth_middleware_1.authenticate);
 router.get('/me', apptCtrl.getMyAppointments);
 router.get('/upcoming', apptCtrl.getUpcomingAppointment);
 router.get('/categories', apptCtrl.getAppointmentCategories);
+router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
 router.get('/:id', apptCtrl.getAppointmentById);
 router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('appointment_date').isISO8601(), (0, express_validator_1.body)('appointment_time').matches(/^\d{2}:\d{2}$/), validate_middleware_1.validate, apptCtrl.createAppointment);
 router.patch('/:id/cancel', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), apptCtrl.cancelAppointment);

@@ -421,3 +421,18 @@ export const getAppointmentCategories = async (_req: Request, res: Response, nex
     next(err);
   }
 };
+
+// GET /appointments/nature-of-visits
+export const getNatureOfVisits = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await query(
+      `SELECT id, name, description
+       FROM nature_of_visit
+       WHERE is_active = true
+       ORDER BY name ASC`,
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    next(err);
+  }
+};
