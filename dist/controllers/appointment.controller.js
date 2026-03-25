@@ -353,7 +353,6 @@ const getAppointmentCategories = async (_req, res, next) => {
             success: true,
             data: {
                 doctor_specializations: result.rows.map((r) => r.specialization),
-                nature_of_visit: ['consultation', 'follow_up', 'emergency', 'procedure', 'checkup'],
             },
         });
     }

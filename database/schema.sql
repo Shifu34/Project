@@ -222,7 +222,18 @@ CREATE TABLE IF NOT EXISTS doctor_schedules (
 );
 
 -- =============================================================
--- 11. APPOINTMENTS
+-- 11. NATURE_OF_VISIT
+-- =============================================================
+CREATE TABLE IF NOT EXISTS nature_of_visit (
+    id          SERIAL PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    is_active   BOOLEAN DEFAULT TRUE,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 12. APPOINTMENTS
 -- =============================================================
 CREATE TABLE appointments (
     id                  SERIAL PRIMARY KEY,
