@@ -631,7 +631,8 @@ const getDoctorAvailableSlots = async (req, res, next) => {
          WHERE doctor_id = $1 AND appointment_date = $2
            AND status NOT IN ('cancelled', 'no_show')`, [doctorId, date]),
         ]);
-        const bookedTimes = new Set(bookedRes.rows.map(r => `${r.appointment_type}:${String(r.appointment_time).slice(0, 5)}`));
+        // Build a set of booked times (HH:mm) — a doctor cannot take two appointments at the same time
+        const bookedTimes = new Set(bookedRes.rows.map(r => String(r.appointment_time).slice(0, 5)));
         const availableSlots = [];
         for (const sched of scheduleRes.rows) {
             const [sh, sm] = String(sched.start_time).split(':').map(Number);
@@ -642,7 +643,7 @@ const getDoctorAvailableSlots = async (req, res, next) => {
                 const hh = String(Math.floor(current / 60)).padStart(2, '0');
                 const mm = String(current % 60).padStart(2, '0');
                 const timeStr = `${hh}:${mm}`;
-                if (!bookedTimes.has(`${sched.appointment_type}:${timeStr}`)) {
+                if (!bookedTimes.has(timeStr)) {
                     availableSlots.push({ schedule_id: sched.id, appointment_type: sched.appointment_type, time: timeStr });
                 }
                 current += 30;

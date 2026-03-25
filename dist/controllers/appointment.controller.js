@@ -283,7 +283,7 @@ const patchAppointment = async (req, res, next) => {
         const allowed = [
             'appointment_date', 'appointment_time', 'duration_minutes',
             'appointment_type', 'nature_of_visit', 'reason', 'notes',
-            'patient_id', 'doctor_id', 'department_id',
+            'status', 'patient_id', 'doctor_id', 'department_id',
         ];
         const sets = [];
         const params = [];
@@ -353,6 +353,7 @@ const getAppointmentCategories = async (_req, res, next) => {
             success: true,
             data: {
                 doctor_specializations: result.rows.map((r) => r.specialization),
+                nature_of_visit: ['consultation', 'follow_up', 'emergency', 'procedure', 'checkup'],
             },
         });
     }

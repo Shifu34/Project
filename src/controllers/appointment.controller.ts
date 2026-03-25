@@ -329,7 +329,7 @@ export const patchAppointment = async (req: AuthRequest, res: Response, next: Ne
     const allowed = [
       'appointment_date', 'appointment_time', 'duration_minutes',
       'appointment_type', 'nature_of_visit', 'reason', 'notes',
-      'patient_id', 'doctor_id', 'department_id',
+      'status', 'patient_id', 'doctor_id', 'department_id',
     ];
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -413,6 +413,7 @@ export const getAppointmentCategories = async (_req: Request, res: Response, nex
       success: true,
       data: {
         doctor_specializations: result.rows.map((r: { specialization: string }) => r.specialization),
+        nature_of_visit: ['consultation', 'follow_up', 'emergency', 'procedure', 'checkup'],
       },
     });
   } catch (err) {

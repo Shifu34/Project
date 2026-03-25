@@ -739,8 +739,9 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
       ),
     ]);
 
+    // Build a set of booked times (HH:mm) — a doctor cannot take two appointments at the same time
     const bookedTimes = new Set(
-      bookedRes.rows.map(r => `${r.appointment_type}:${String(r.appointment_time).slice(0, 5)}`),
+      bookedRes.rows.map(r => String(r.appointment_time).slice(0, 5)),
     );
 
     const availableSlots: { schedule_id: number; appointment_type: string; time: string }[] = [];
@@ -755,7 +756,7 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
         const hh = String(Math.floor(current / 60)).padStart(2, '0');
         const mm = String(current % 60).padStart(2, '0');
         const timeStr = `${hh}:${mm}`;
-        if (!bookedTimes.has(`${sched.appointment_type}:${timeStr}`)) {
+        if (!bookedTimes.has(timeStr)) {
           availableSlots.push({ schedule_id: sched.id, appointment_type: sched.appointment_type, time: timeStr });
         }
         current += 30;
