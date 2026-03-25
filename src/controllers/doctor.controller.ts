@@ -717,19 +717,11 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
 export const getDoctorAvailableSlots = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const doctorId = req.params.id;
-    const now = new Date();
-    const todayUTC = now.toISOString().split('T')[0];
-    const date = (req.query.date as string) || todayUTC;
+    const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
 
     const d = new Date(`${date}T00:00:00`);
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const dayOfWeek = dayNames[d.getDay()];
-
-    let currentMinutes = 0;
-    const isToday = date === todayUTC;
-    if (isToday) {
-      currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-    }
 
     const [scheduleRes, bookedRes] = await Promise.all([
       query(
@@ -739,7 +731,7 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
         [doctorId, dayOfWeek],
       ),
       query(
-        `SELECT appointment_time, appointment_type
+        `SELECT appointment_time
          FROM appointments
          WHERE doctor_id = $1 AND appointment_date = $2
            AND status NOT IN ('cancelled', 'no_show')`,
@@ -747,7 +739,6 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
       ),
     ]);
 
-    // Build a set of booked times (HH:mm) — a doctor cannot take two appointments at the same time
     const bookedTimes = new Set(
       bookedRes.rows.map(r => String(r.appointment_time).slice(0, 5)),
     );
@@ -761,11 +752,6 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
       const end = eh * 60 + em;
 
       while (current + 30 <= end) {
-        // Skip slots already in the past when date is today
-        if (isToday && current <= currentMinutes) {
-          current += 30;
-          continue;
-        }
         const hh = String(Math.floor(current / 60)).padStart(2, '0');
         const mm = String(current % 60).padStart(2, '0');
         const timeStr = `${hh}:${mm}`;
