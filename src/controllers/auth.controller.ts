@@ -114,7 +114,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     await query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
 
     // Patient CNIC sync — link migrated records or create patient row if missing
-    let patientData: { gender?: string; date_of_birth?: Date } = {};
+    let patientData: { id?: number; gender?: string; date_of_birth?: Date } = {};
     if (user.role_name === 'patient') {
       if (user.cnic) {
         const patientRes = await query(
@@ -132,7 +132,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
         }
       } else {
         const patientRes = await query(
-          `SELECT gender, date_of_birth FROM patients WHERE user_id = $1 LIMIT 1`,
+          `SELECT id, gender, date_of_birth FROM patients WHERE user_id = $1 LIMIT 1`,
           [user.id],
         );
         if (patientRes.rows.length > 0) patientData = patientRes.rows[0];
@@ -167,6 +167,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           gender: patientData.gender ?? null,
           date_of_birth: patientData.date_of_birth ?? null,
           ...(doctorId !== null && { doctor_id: doctorId }),
+          ...(patientData.id !== undefined && { patient_id: patientData.id }),
         },
       },
     });

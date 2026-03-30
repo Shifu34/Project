@@ -103,7 +103,7 @@ const login = async (req, res, next) => {
                 }
             }
             else {
-                const patientRes = await (0, database_1.query)(`SELECT gender, date_of_birth FROM patients WHERE user_id = $1 LIMIT 1`, [user.id]);
+                const patientRes = await (0, database_1.query)(`SELECT id, gender, date_of_birth FROM patients WHERE user_id = $1 LIMIT 1`, [user.id]);
                 if (patientRes.rows.length > 0)
                     patientData = patientRes.rows[0];
             }
@@ -135,6 +135,7 @@ const login = async (req, res, next) => {
                     gender: patientData.gender ?? null,
                     date_of_birth: patientData.date_of_birth ?? null,
                     ...(doctorId !== null && { doctor_id: doctorId }),
+                    ...(patientData.id !== undefined && { patient_id: patientData.id }),
                 },
             },
         });

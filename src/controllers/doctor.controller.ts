@@ -234,14 +234,14 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
     let countIdx = 1;
 
     if (search) {
-      const clause = `(CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${dataIdx} OR d.specialization ILIKE $${dataIdx} OR dept.name ILIKE $${dataIdx})`;
+      const clause = `(CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE '%' || $${dataIdx} || '%' OR d.specialization ILIKE '%' || $${dataIdx} || '%' OR $${dataIdx} ILIKE '%' || d.specialization || '%' OR dept.name ILIKE '%' || $${dataIdx} || '%')`;
       dataConditions.push(clause);
-      dataParams.push(`%${search}%`);
+      dataParams.push(search);
       dataIdx++;
 
-      const cClause = `(CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE $${countIdx} OR d.specialization ILIKE $${countIdx} OR dept.name ILIKE $${countIdx})`;
+      const cClause = `(CONCAT(COALESCE(u.first_name, d.first_name),' ',COALESCE(u.last_name, d.last_name)) ILIKE '%' || $${countIdx} || '%' OR d.specialization ILIKE '%' || $${countIdx} || '%' OR $${countIdx} ILIKE '%' || d.specialization || '%' OR dept.name ILIKE '%' || $${countIdx} || '%')`;
       countConditions.push(cClause);
-      countParams.push(`%${search}%`);
+      countParams.push(search);
       countIdx++;
     }
 
@@ -390,11 +390,11 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     }
 
     if (category) {
-      dataConditions.push(`d.specialization ILIKE $${dataIdx}`);
-      dataParams.push(`%${category}%`);
+      dataConditions.push(`(d.specialization ILIKE '%' || $${dataIdx} || '%' OR $${dataIdx} ILIKE '%' || d.specialization || '%')`);
+      dataParams.push(category);
       dataIdx++;
-      countConditions.push(`d.specialization ILIKE $${countIdx}`);
-      countParams.push(`%${category}%`);
+      countConditions.push(`(d.specialization ILIKE '%' || $${countIdx} || '%' OR $${countIdx} ILIKE '%' || d.specialization || '%')`);
+      countParams.push(category);
       countIdx++;
     }
 

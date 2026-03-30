@@ -41,6 +41,65 @@ export const getPatients = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// GET /patients/search?first_name=&last_name=&gender=&blood_type=&phone=&email=&patient_code=&date_of_birth=&page=&limit=
+export const searchPatientsByParams = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const page     = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
+    const limit    = Math.min(100, parseInt(req.query.limit as string || '20', 10));
+    const offset   = (page - 1) * limit;
+
+    const first_name    = (req.query.first_name    as string || '').trim();
+    const last_name     = (req.query.last_name     as string || '').trim();
+    const gender        = (req.query.gender        as string || '').trim();
+    const blood_type    = (req.query.blood_type    as string || '').trim();
+    const phone         = (req.query.phone         as string || '').trim();
+    const email         = (req.query.email         as string || '').trim();
+    const patient_code  = (req.query.patient_code  as string || '').trim();
+    const date_of_birth = (req.query.date_of_birth as string || '').trim();
+
+    // Collect filter pairs: [sql_clause_template, value]
+    const filters: Array<[string, unknown]> = [];
+    if (first_name)    filters.push([`p.first_name ILIKE $IDX`,    `%${first_name}%`]);
+    if (last_name)     filters.push([`p.last_name ILIKE $IDX`,     `%${last_name}%`]);
+    if (gender)        filters.push([`p.gender = $IDX`,            gender]);
+    if (blood_type)    filters.push([`p.blood_type ILIKE $IDX`,    `%${blood_type}%`]);
+    if (phone)         filters.push([`p.phone ILIKE $IDX`,         `%${phone}%`]);
+    if (email)         filters.push([`p.email ILIKE $IDX`,         `%${email}%`]);
+    if (patient_code)  filters.push([`p.patient_code ILIKE $IDX`,  `%${patient_code}%`]);
+    if (date_of_birth) filters.push([`p.date_of_birth = $IDX`,     date_of_birth]);
+
+    const filterValues = filters.map(([, v]) => v);
+    const dataConditions  = filters.map(([clause], i) => clause.replace('$IDX', `$${3 + i}`));
+    const countConditions = filters.map(([clause], i) => clause.replace('$IDX', `$${1 + i}`));
+
+    const where      = dataConditions.length  ? `WHERE ${dataConditions.join(' AND ')}`  : '';
+    const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
+
+    const dataParams: unknown[]  = [limit, offset, ...filterValues];
+    const countParams: unknown[] = [...filterValues];
+
+    const [dataRes, countRes] = await Promise.all([
+      query(
+        `SELECT p.*, CONCAT(p.first_name,' ',p.last_name) AS full_name,
+                DATE_PART('year', AGE(p.date_of_birth))::INT AS age
+         FROM patients p ${where}
+         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`,
+        dataParams,
+      ),
+      query(`SELECT COUNT(*) FROM patients p ${countWhere}`, countParams),
+    ]);
+
+    const total = parseInt(countRes.rows[0].count, 10);
+    res.json({
+      success: true,
+      data: dataRes.rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // GET /patients/:id
 export const getPatientById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPatientMedicalHistory = exports.getPatientVisits = exports.getPatientAppointments = exports.deletePatient = exports.updatePatient = exports.updateMyProfile = exports.createPatient = exports.getPatientByUserId = exports.getPatientById = exports.getPatients = void 0;
+exports.getPatientMedicalHistory = exports.getPatientVisits = exports.getPatientAppointments = exports.deletePatient = exports.updatePatient = exports.updateMyProfile = exports.createPatient = exports.getPatientByUserId = exports.getPatientById = exports.searchPatientsByParams = exports.getPatients = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 // GET /patients  – paginated list
@@ -38,6 +38,64 @@ const getPatients = async (req, res, next) => {
     }
 };
 exports.getPatients = getPatients;
+// GET /patients/search?first_name=&last_name=&gender=&blood_type=&phone=&email=&patient_code=&date_of_birth=&page=&limit=
+const searchPatientsByParams = async (req, res, next) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const offset = (page - 1) * limit;
+        const first_name = (req.query.first_name || '').trim();
+        const last_name = (req.query.last_name || '').trim();
+        const gender = (req.query.gender || '').trim();
+        const blood_type = (req.query.blood_type || '').trim();
+        const phone = (req.query.phone || '').trim();
+        const email = (req.query.email || '').trim();
+        const patient_code = (req.query.patient_code || '').trim();
+        const date_of_birth = (req.query.date_of_birth || '').trim();
+        // Collect filter pairs: [sql_clause_template, value]
+        const filters = [];
+        if (first_name)
+            filters.push([`p.first_name ILIKE $IDX`, `%${first_name}%`]);
+        if (last_name)
+            filters.push([`p.last_name ILIKE $IDX`, `%${last_name}%`]);
+        if (gender)
+            filters.push([`p.gender = $IDX`, gender]);
+        if (blood_type)
+            filters.push([`p.blood_type ILIKE $IDX`, `%${blood_type}%`]);
+        if (phone)
+            filters.push([`p.phone ILIKE $IDX`, `%${phone}%`]);
+        if (email)
+            filters.push([`p.email ILIKE $IDX`, `%${email}%`]);
+        if (patient_code)
+            filters.push([`p.patient_code ILIKE $IDX`, `%${patient_code}%`]);
+        if (date_of_birth)
+            filters.push([`p.date_of_birth = $IDX`, date_of_birth]);
+        const filterValues = filters.map(([, v]) => v);
+        const dataConditions = filters.map(([clause], i) => clause.replace('$IDX', `$${3 + i}`));
+        const countConditions = filters.map(([clause], i) => clause.replace('$IDX', `$${1 + i}`));
+        const where = dataConditions.length ? `WHERE ${dataConditions.join(' AND ')}` : '';
+        const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
+        const dataParams = [limit, offset, ...filterValues];
+        const countParams = [...filterValues];
+        const [dataRes, countRes] = await Promise.all([
+            (0, database_1.query)(`SELECT p.*, CONCAT(p.first_name,' ',p.last_name) AS full_name,
+                DATE_PART('year', AGE(p.date_of_birth))::INT AS age
+         FROM patients p ${where}
+         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, dataParams),
+            (0, database_1.query)(`SELECT COUNT(*) FROM patients p ${countWhere}`, countParams),
+        ]);
+        const total = parseInt(countRes.rows[0].count, 10);
+        res.json({
+            success: true,
+            data: dataRes.rows,
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.searchPatientsByParams = searchPatientsByParams;
 // GET /patients/:id
 const getPatientById = async (req, res, next) => {
     try {
