@@ -72,8 +72,16 @@ exports.getAppointmentById = getAppointmentById;
 // POST /appointments
 const createAppointment = async (req, res, next) => {
     try {
-        const { patient_id, doctor_id, department_id, appointment_date, appointment_time, duration_minutes, appointment_type, nature_of_visit_id, reason, notes, } = req.body;
+        const { patient_id, doctor_id, department_id, appointment_date, appointment_time, duration_minutes, appointment_type, nature_of_visit_id, nature_of_visit, reason, notes, } = req.body;
         const bookedBy = req.user?.userId;
+        // Resolve nature_of_visit_id: accept either the ID directly or a name string
+        let resolvedNatureId = nature_of_visit_id || null;
+        if (!resolvedNatureId && nature_of_visit) {
+            const novRes = await (0, database_1.query)(`SELECT id FROM nature_of_visit WHERE name ILIKE $1 LIMIT 1`, [nature_of_visit.trim()]);
+            if (novRes.rows.length > 0) {
+                resolvedNatureId = novRes.rows[0].id;
+            }
+        }
         // Conflict check
         const conflict = await (0, database_1.query)(`SELECT id FROM appointments
        WHERE doctor_id = $1 AND appointment_date = $2 AND appointment_time = $3
@@ -86,7 +94,7 @@ const createAppointment = async (req, res, next) => {
          (patient_id, doctor_id, department_id, appointment_date, appointment_time,
           duration_minutes, appointment_type, nature_of_visit_id, reason, notes, booked_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [patient_id, doctor_id, department_id, appointment_date, appointment_time,
-            duration_minutes || 30, appointment_type || 'Online Consultation', nature_of_visit_id || null, reason, notes, bookedBy]);
+            duration_minutes || 30, appointment_type || 'Online Consultation', resolvedNatureId, reason, notes, bookedBy]);
         res.status(201).json({ success: true, data: result.rows[0] });
     }
     catch (err) {
