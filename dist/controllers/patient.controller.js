@@ -23,52 +23,32 @@ const getPatients = async (req, res, next) => {
             }
             doctorId = docRes.rows[0].id;
         }
-        const conditions = [];
-        const dataParams = [limit, offset];
-        const countParams = [];
-        let dataIdx = 3;
-        let countIdx = 1;
+        const dataValues = [limit, offset];
+        const countValues = [];
+        const dataClauses = [];
+        const countClauses = [];
         if (doctorId !== null) {
-            conditions.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${dataIdx})`);
-            dataParams.push(doctorId);
-            dataIdx++;
-            countParams.push(doctorId);
-            countIdx++;
+            dataClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${dataValues.length + 1})`);
+            dataValues.push(doctorId);
+            countClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${countValues.length + 1})`);
+            countValues.push(doctorId);
         }
         if (search) {
-            const searchClause = `(p.first_name ILIKE $${dataIdx} OR p.last_name ILIKE $${dataIdx} OR p.patient_code ILIKE $${dataIdx} OR p.phone ILIKE $${dataIdx} OR p.email ILIKE $${dataIdx})`;
-            conditions.push(searchClause);
-            dataParams.push(`%${search}%`);
-            dataIdx++;
-            const cSearchClause = `(p.first_name ILIKE $${countIdx} OR p.last_name ILIKE $${countIdx} OR p.patient_code ILIKE $${countIdx} OR p.phone ILIKE $${countIdx} OR p.email ILIKE $${countIdx})`;
-            const cParams = [...countParams, `%${search}%`];
-            conditions.length > (doctorId !== null ? 1 : 0)
-                ? countParams.push(`%${search}%`)
-                : countParams.push(`%${search}%`);
-            countIdx++;
-            void cSearchClause;
-            void cParams; // used below
+            const s = `%${search}%`;
+            const searchSql = (n) => `(p.first_name ILIKE $${n} OR p.last_name ILIKE $${n} OR p.patient_code ILIKE $${n} OR p.phone ILIKE $${n} OR p.email ILIKE $${n})`;
+            dataClauses.push(searchSql(dataValues.length + 1));
+            dataValues.push(s);
+            countClauses.push(searchSql(countValues.length + 1));
+            countValues.push(s);
         }
-        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-        // Rebuild count conditions with correct param indices (start from $1)
-        const countConditions = [];
-        const finalCountParams = [];
-        let ci = 1;
-        if (doctorId !== null) {
-            countConditions.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${ci++})`);
-            finalCountParams.push(doctorId);
-        }
-        if (search) {
-            countConditions.push(`(p.first_name ILIKE $${ci} OR p.last_name ILIKE $${ci} OR p.patient_code ILIKE $${ci} OR p.phone ILIKE $${ci} OR p.email ILIKE $${ci})`);
-            finalCountParams.push(`%${search}%`);
-        }
-        const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
+        const where = dataClauses.length ? `WHERE ${dataClauses.join(' AND ')}` : '';
+        const countWhere = countClauses.length ? `WHERE ${countClauses.join(' AND ')}` : '';
         const [dataRes, countRes] = await Promise.all([
             (0, database_1.query)(`SELECT p.*, CONCAT(p.first_name,' ',p.last_name) AS full_name,
                 DATE_PART('year', AGE(p.date_of_birth))::INT AS age
          FROM patients p ${where}
-         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, dataParams),
-            (0, database_1.query)(`SELECT COUNT(*) FROM patients p ${countWhere}`, finalCountParams),
+         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, dataValues),
+            (0, database_1.query)(`SELECT COUNT(*) FROM patients p ${countWhere}`, countValues),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({
@@ -106,39 +86,42 @@ const searchPatientsByParams = async (req, res, next) => {
             }
             doctorId = docRes.rows[0].id;
         }
-        // Build filter list — doctor scope always first so param indices are consistent
-        const filters = [];
+        const dataValues = [limit, offset];
+        const countValues = [];
+        const dataClauses = [];
+        const countClauses = [];
+        const addFilter = (sql, value) => {
+            dataClauses.push(sql.replace('?', `$${dataValues.length + 1}`));
+            dataValues.push(value);
+            countClauses.push(sql.replace('?', `$${countValues.length + 1}`));
+            countValues.push(value);
+        };
         if (doctorId !== null)
-            filters.push([`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $IDX)`, doctorId]);
+            addFilter(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = ?)`, doctorId);
         if (first_name)
-            filters.push([`p.first_name ILIKE $IDX`, `%${first_name}%`]);
+            addFilter(`p.first_name ILIKE ?`, `%${first_name}%`);
         if (last_name)
-            filters.push([`p.last_name ILIKE $IDX`, `%${last_name}%`]);
+            addFilter(`p.last_name ILIKE ?`, `%${last_name}%`);
         if (gender)
-            filters.push([`p.gender = $IDX`, gender]);
+            addFilter(`p.gender = ?`, gender);
         if (blood_type)
-            filters.push([`p.blood_type ILIKE $IDX`, `%${blood_type}%`]);
+            addFilter(`p.blood_type ILIKE ?`, `%${blood_type}%`);
         if (phone)
-            filters.push([`p.phone ILIKE $IDX`, `%${phone}%`]);
+            addFilter(`p.phone ILIKE ?`, `%${phone}%`);
         if (email)
-            filters.push([`p.email ILIKE $IDX`, `%${email}%`]);
+            addFilter(`p.email ILIKE ?`, `%${email}%`);
         if (patient_code)
-            filters.push([`p.patient_code ILIKE $IDX`, `%${patient_code}%`]);
+            addFilter(`p.patient_code ILIKE ?`, `%${patient_code}%`);
         if (date_of_birth)
-            filters.push([`p.date_of_birth = $IDX`, date_of_birth]);
-        const filterValues = filters.map(([, v]) => v);
-        const dataConditions = filters.map(([clause], i) => clause.replace('$IDX', `$${3 + i}`));
-        const countConditions = filters.map(([clause], i) => clause.replace('$IDX', `$${1 + i}`));
-        const where = dataConditions.length ? `WHERE ${dataConditions.join(' AND ')}` : '';
-        const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
-        const dataParams = [limit, offset, ...filterValues];
-        const countParams = [...filterValues];
+            addFilter(`p.date_of_birth = ?`, date_of_birth);
+        const where = dataClauses.length ? `WHERE ${dataClauses.join(' AND ')}` : '';
+        const countWhere = countClauses.length ? `WHERE ${countClauses.join(' AND ')}` : '';
         const [dataRes, countRes] = await Promise.all([
             (0, database_1.query)(`SELECT p.*, CONCAT(p.first_name,' ',p.last_name) AS full_name,
                 DATE_PART('year', AGE(p.date_of_birth))::INT AS age
          FROM patients p ${where}
-         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, dataParams),
-            (0, database_1.query)(`SELECT COUNT(*) FROM patients p ${countWhere}`, countParams),
+         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, dataValues),
+            (0, database_1.query)(`SELECT COUNT(*) FROM patients p ${countWhere}`, countValues),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({
@@ -159,7 +142,7 @@ const getPatientById = async (req, res, next) => {
               DATE_PART('year', AGE(p.date_of_birth))::INT AS age,
               json_agg(DISTINCT jsonb_build_object(
                 'id',ui.id,'provider_id',ui.insurance_provider_id,
-                'policy_number',ui.policy_number,'is_active',ui.is_active
+                'policy_number',ui.policy_number,'is_primary',ui.is_primary
               )) FILTER (WHERE ui.id IS NOT NULL) AS insurance
        FROM patients p
        LEFT JOIN user_insurances ui ON ui.patient_id = p.id

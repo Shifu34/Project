@@ -22,50 +22,29 @@ export const getPatients = async (req: AuthRequest, res: Response, next: NextFun
       doctorId = docRes.rows[0].id;
     }
 
-    const conditions: string[] = [];
-    const dataParams: unknown[] = [limit, offset];
-    const countParams: unknown[] = [];
-    let dataIdx = 3;
-    let countIdx = 1;
+    const dataValues: unknown[] = [limit, offset];
+    const countValues: unknown[] = [];
+    const dataClauses: string[] = [];
+    const countClauses: string[] = [];
 
     if (doctorId !== null) {
-      conditions.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${dataIdx})`);
-      dataParams.push(doctorId);
-      dataIdx++;
-      countParams.push(doctorId);
-      countIdx++;
+      dataClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${dataValues.length + 1})`);
+      dataValues.push(doctorId);
+      countClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${countValues.length + 1})`);
+      countValues.push(doctorId);
     }
 
     if (search) {
-      const searchClause = `(p.first_name ILIKE $${dataIdx} OR p.last_name ILIKE $${dataIdx} OR p.patient_code ILIKE $${dataIdx} OR p.phone ILIKE $${dataIdx} OR p.email ILIKE $${dataIdx})`;
-      conditions.push(searchClause);
-      dataParams.push(`%${search}%`);
-      dataIdx++;
-
-      const cSearchClause = `(p.first_name ILIKE $${countIdx} OR p.last_name ILIKE $${countIdx} OR p.patient_code ILIKE $${countIdx} OR p.phone ILIKE $${countIdx} OR p.email ILIKE $${countIdx})`;
-      const cParams = [...countParams, `%${search}%`];
-      conditions.length > (doctorId !== null ? 1 : 0)
-        ? countParams.push(`%${search}%`)
-        : countParams.push(`%${search}%`);
-      countIdx++;
-      void cSearchClause; void cParams; // used below
+      const s = `%${search}%`;
+      const searchSql = (n: number) => `(p.first_name ILIKE $${n} OR p.last_name ILIKE $${n} OR p.patient_code ILIKE $${n} OR p.phone ILIKE $${n} OR p.email ILIKE $${n})`;
+      dataClauses.push(searchSql(dataValues.length + 1));
+      dataValues.push(s);
+      countClauses.push(searchSql(countValues.length + 1));
+      countValues.push(s);
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    // Rebuild count conditions with correct param indices (start from $1)
-    const countConditions: string[] = [];
-    const finalCountParams: unknown[] = [];
-    let ci = 1;
-    if (doctorId !== null) {
-      countConditions.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${ci++})`);
-      finalCountParams.push(doctorId);
-    }
-    if (search) {
-      countConditions.push(`(p.first_name ILIKE $${ci} OR p.last_name ILIKE $${ci} OR p.patient_code ILIKE $${ci} OR p.phone ILIKE $${ci} OR p.email ILIKE $${ci})`);
-      finalCountParams.push(`%${search}%`);
-    }
-    const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
+    const where      = dataClauses.length  ? `WHERE ${dataClauses.join(' AND ')}`  : '';
+    const countWhere = countClauses.length ? `WHERE ${countClauses.join(' AND ')}` : '';
 
     const [dataRes, countRes] = await Promise.all([
       query(
@@ -73,9 +52,9 @@ export const getPatients = async (req: AuthRequest, res: Response, next: NextFun
                 DATE_PART('year', AGE(p.date_of_birth))::INT AS age
          FROM patients p ${where}
          ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`,
-        dataParams,
+        dataValues,
       ),
-      query(`SELECT COUNT(*) FROM patients p ${countWhere}`, finalCountParams),
+      query(`SELECT COUNT(*) FROM patients p ${countWhere}`, countValues),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
@@ -116,27 +95,30 @@ export const searchPatientsByParams = async (req: AuthRequest, res: Response, ne
       doctorId = docRes.rows[0].id;
     }
 
-    // Build filter list — doctor scope always first so param indices are consistent
-    const filters: Array<[string, unknown]> = [];
-    if (doctorId !== null) filters.push([`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $IDX)`, doctorId]);
-    if (first_name)    filters.push([`p.first_name ILIKE $IDX`,    `%${first_name}%`]);
-    if (last_name)     filters.push([`p.last_name ILIKE $IDX`,     `%${last_name}%`]);
-    if (gender)        filters.push([`p.gender = $IDX`,            gender]);
-    if (blood_type)    filters.push([`p.blood_type ILIKE $IDX`,    `%${blood_type}%`]);
-    if (phone)         filters.push([`p.phone ILIKE $IDX`,         `%${phone}%`]);
-    if (email)         filters.push([`p.email ILIKE $IDX`,         `%${email}%`]);
-    if (patient_code)  filters.push([`p.patient_code ILIKE $IDX`,  `%${patient_code}%`]);
-    if (date_of_birth) filters.push([`p.date_of_birth = $IDX`,     date_of_birth]);
+    const dataValues: unknown[] = [limit, offset];
+    const countValues: unknown[] = [];
+    const dataClauses: string[] = [];
+    const countClauses: string[] = [];
 
-    const filterValues = filters.map(([, v]) => v);
-    const dataConditions  = filters.map(([clause], i) => clause.replace('$IDX', `$${3 + i}`));
-    const countConditions = filters.map(([clause], i) => clause.replace('$IDX', `$${1 + i}`));
+    const addFilter = (sql: string, value: unknown) => {
+      dataClauses.push(sql.replace('?', `$${dataValues.length + 1}`));
+      dataValues.push(value);
+      countClauses.push(sql.replace('?', `$${countValues.length + 1}`));
+      countValues.push(value);
+    };
 
-    const where      = dataConditions.length  ? `WHERE ${dataConditions.join(' AND ')}`  : '';
-    const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
+    if (doctorId !== null) addFilter(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = ?)`, doctorId);
+    if (first_name)    addFilter(`p.first_name ILIKE ?`,   `%${first_name}%`);
+    if (last_name)     addFilter(`p.last_name ILIKE ?`,    `%${last_name}%`);
+    if (gender)        addFilter(`p.gender = ?`,           gender);
+    if (blood_type)    addFilter(`p.blood_type ILIKE ?`,   `%${blood_type}%`);
+    if (phone)         addFilter(`p.phone ILIKE ?`,        `%${phone}%`);
+    if (email)         addFilter(`p.email ILIKE ?`,        `%${email}%`);
+    if (patient_code)  addFilter(`p.patient_code ILIKE ?`, `%${patient_code}%`);
+    if (date_of_birth) addFilter(`p.date_of_birth = ?`,    date_of_birth);
 
-    const dataParams: unknown[]  = [limit, offset, ...filterValues];
-    const countParams: unknown[] = [...filterValues];
+    const where      = dataClauses.length  ? `WHERE ${dataClauses.join(' AND ')}`  : '';
+    const countWhere = countClauses.length ? `WHERE ${countClauses.join(' AND ')}` : '';
 
     const [dataRes, countRes] = await Promise.all([
       query(
@@ -144,9 +126,9 @@ export const searchPatientsByParams = async (req: AuthRequest, res: Response, ne
                 DATE_PART('year', AGE(p.date_of_birth))::INT AS age
          FROM patients p ${where}
          ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`,
-        dataParams,
+        dataValues,
       ),
-      query(`SELECT COUNT(*) FROM patients p ${countWhere}`, countParams),
+      query(`SELECT COUNT(*) FROM patients p ${countWhere}`, countValues),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
@@ -168,7 +150,7 @@ export const getPatientById = async (req: Request, res: Response, next: NextFunc
               DATE_PART('year', AGE(p.date_of_birth))::INT AS age,
               json_agg(DISTINCT jsonb_build_object(
                 'id',ui.id,'provider_id',ui.insurance_provider_id,
-                'policy_number',ui.policy_number,'is_active',ui.is_active
+                'policy_number',ui.policy_number,'is_primary',ui.is_primary
               )) FILTER (WHERE ui.id IS NOT NULL) AS insurance
        FROM patients p
        LEFT JOIN user_insurances ui ON ui.patient_id = p.id
