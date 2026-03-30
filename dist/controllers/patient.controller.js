@@ -13,18 +13,62 @@ const getPatients = async (req, res, next) => {
         const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
         const search = (req.query.search || '').trim();
         const offset = (page - 1) * limit;
-        const searchClause = search
-            ? `WHERE (p.first_name ILIKE $3 OR p.last_name ILIKE $3 OR p.patient_code ILIKE $3 OR p.phone ILIKE $3 OR p.email ILIKE $3)`
-            : '';
-        const params = [limit, offset];
-        if (search)
-            params.push(`%${search}%`);
+        // If caller is a doctor, restrict to patients they have appointments with
+        let doctorId = null;
+        if (req.user?.roleName === 'doctor') {
+            const docRes = await (0, database_1.query)(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [req.user.userId]);
+            if (docRes.rows.length === 0) {
+                res.status(404).json({ success: false, message: 'Doctor profile not found' });
+                return;
+            }
+            doctorId = docRes.rows[0].id;
+        }
+        const conditions = [];
+        const dataParams = [limit, offset];
+        const countParams = [];
+        let dataIdx = 3;
+        let countIdx = 1;
+        if (doctorId !== null) {
+            conditions.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${dataIdx})`);
+            dataParams.push(doctorId);
+            dataIdx++;
+            countParams.push(doctorId);
+            countIdx++;
+        }
+        if (search) {
+            const searchClause = `(p.first_name ILIKE $${dataIdx} OR p.last_name ILIKE $${dataIdx} OR p.patient_code ILIKE $${dataIdx} OR p.phone ILIKE $${dataIdx} OR p.email ILIKE $${dataIdx})`;
+            conditions.push(searchClause);
+            dataParams.push(`%${search}%`);
+            dataIdx++;
+            const cSearchClause = `(p.first_name ILIKE $${countIdx} OR p.last_name ILIKE $${countIdx} OR p.patient_code ILIKE $${countIdx} OR p.phone ILIKE $${countIdx} OR p.email ILIKE $${countIdx})`;
+            const cParams = [...countParams, `%${search}%`];
+            conditions.length > (doctorId !== null ? 1 : 0)
+                ? countParams.push(`%${search}%`)
+                : countParams.push(`%${search}%`);
+            countIdx++;
+            void cSearchClause;
+            void cParams; // used below
+        }
+        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        // Rebuild count conditions with correct param indices (start from $1)
+        const countConditions = [];
+        const finalCountParams = [];
+        let ci = 1;
+        if (doctorId !== null) {
+            countConditions.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${ci++})`);
+            finalCountParams.push(doctorId);
+        }
+        if (search) {
+            countConditions.push(`(p.first_name ILIKE $${ci} OR p.last_name ILIKE $${ci} OR p.patient_code ILIKE $${ci} OR p.phone ILIKE $${ci} OR p.email ILIKE $${ci})`);
+            finalCountParams.push(`%${search}%`);
+        }
+        const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
         const [dataRes, countRes] = await Promise.all([
             (0, database_1.query)(`SELECT p.*, CONCAT(p.first_name,' ',p.last_name) AS full_name,
                 DATE_PART('year', AGE(p.date_of_birth))::INT AS age
-         FROM patients p ${searchClause}
-         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, params),
-            (0, database_1.query)(`SELECT COUNT(*) FROM patients p ${searchClause}`, search ? [`%${search}%`] : []),
+         FROM patients p ${where}
+         ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, dataParams),
+            (0, database_1.query)(`SELECT COUNT(*) FROM patients p ${countWhere}`, finalCountParams),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({
@@ -52,8 +96,20 @@ const searchPatientsByParams = async (req, res, next) => {
         const email = (req.query.email || '').trim();
         const patient_code = (req.query.patient_code || '').trim();
         const date_of_birth = (req.query.date_of_birth || '').trim();
-        // Collect filter pairs: [sql_clause_template, value]
+        // If caller is a doctor, restrict to their own patients
+        let doctorId = null;
+        if (req.user?.roleName === 'doctor') {
+            const docRes = await (0, database_1.query)(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [req.user.userId]);
+            if (docRes.rows.length === 0) {
+                res.status(404).json({ success: false, message: 'Doctor profile not found' });
+                return;
+            }
+            doctorId = docRes.rows[0].id;
+        }
+        // Build filter list — doctor scope always first so param indices are consistent
         const filters = [];
+        if (doctorId !== null)
+            filters.push([`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $IDX)`, doctorId]);
         if (first_name)
             filters.push([`p.first_name ILIKE $IDX`, `%${first_name}%`]);
         if (last_name)

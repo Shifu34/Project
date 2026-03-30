@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-export declare const getPatients: (req: Request, res: Response, next: NextFunction) => Promise<void>;
-export declare const searchPatientsByParams: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+import { AuthRequest } from '../middleware/auth.middleware';
+export declare const getPatients: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;
+export declare const searchPatientsByParams: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;
 export declare const getPatientById: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getPatientByUserId: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const createPatient: (req: Request, res: Response, next: NextFunction) => Promise<void>;
