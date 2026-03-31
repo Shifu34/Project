@@ -10,6 +10,7 @@ import labRoutes          from './lab.routes';
 import wardRoutes         from './ward.routes';
 import billingRoutes      from './billing.routes';
 import pharmacyRoutes     from './pharmacy.routes';
+import callRoutes         from './call.routes';
 import { getDashboardStats } from '../controllers/dashboard.controller';
 import { authenticate }   from '../middleware/auth.middleware';
 
@@ -27,6 +28,7 @@ router.use('/lab',           labRoutes);
 router.use('/ward',          wardRoutes);
 router.use('/billing',       billingRoutes);
 router.use('/pharmacy',      pharmacyRoutes);
+router.use('/calls',         callRoutes);
 router.get('/dashboard',     authenticate, getDashboardStats);
 
 export default router;

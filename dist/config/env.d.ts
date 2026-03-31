@@ -9,5 +9,7 @@ export declare const env: {
     logLevel: string;
     gmailUser: string;
     gmailAppPassword: string;
+    hmsManagementToken: string;
+    hmsTemplateId: string;
 };
 //# sourceMappingURL=env.d.ts.map

@@ -17,5 +17,7 @@ exports.env = {
     logLevel: process.env.LOG_LEVEL || 'info',
     gmailUser: process.env.GMAIL_USER || '',
     gmailAppPassword: process.env.GMAIL_APP_PASSWORD || '',
+    hmsManagementToken: process.env.HMS_MANAGEMENT_TOKEN || '',
+    hmsTemplateId: process.env.HMS_TEMPLATE_ID || '69ca5cc06cb1ece855eaf872',
 };
 //# sourceMappingURL=env.js.map

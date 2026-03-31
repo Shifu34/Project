@@ -794,3 +794,19 @@ CREATE TABLE email_verification_tokens (
 );
 CREATE INDEX idx_evt_email ON email_verification_tokens(email);
 
+-- =============================================================
+-- 37. VIDEO_CALL_ROOMS (100ms integration)
+-- =============================================================
+CREATE TABLE video_call_rooms (
+    id                 SERIAL PRIMARY KEY,
+    appointment_id     INT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+    patient_id         INT NOT NULL REFERENCES patients(id),
+    doctor_id          INT NOT NULL REFERENCES doctors(id),
+    room_id            VARCHAR(100) NOT NULL,
+    patient_room_code  VARCHAR(50) NOT NULL,
+    doctor_room_code   VARCHAR(50) NOT NULL,
+    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_vcr_appointment ON video_call_rooms(appointment_id);
+CREATE INDEX idx_vcr_room_id ON video_call_rooms(room_id);
+
