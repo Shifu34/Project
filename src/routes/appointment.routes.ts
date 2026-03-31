@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import * as apptCtrl from '../controllers/appointment.controller';
-import * as callCtrl from '../controllers/call.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 
@@ -15,7 +14,6 @@ router.get('/upcoming',         apptCtrl.getUpcomingAppointment);
 router.get('/categories',       apptCtrl.getAppointmentCategories);
 router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
 router.get('/:id',              apptCtrl.getAppointmentById);
-router.get('/:appointment_id/video', callCtrl.getAppointmentVideo);
 
 router.post('/',
   authorize('admin', 'doctor', 'patient'),
