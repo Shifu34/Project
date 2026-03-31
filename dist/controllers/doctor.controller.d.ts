@@ -16,4 +16,6 @@ export declare const getDoctorAvailableSlots: (req: Request, res: Response, next
 export declare const updateDoctorSchedule: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;
 export declare const deleteDoctorSchedule: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;
 export declare const getDoctorBookedAppointments: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getDoctorSpecialization: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getAllSpecializations: (_req: Request, res: Response, next: NextFunction) => Promise<void>;
 //# sourceMappingURL=doctor.controller.d.ts.map

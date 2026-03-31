@@ -881,3 +881,42 @@ export const getDoctorBookedAppointments = async (req: Request, res: Response, n
     next(err);
   }
 };
+
+// GET /doctors/:id/specialization — get a specific doctor's specialization
+export const getDoctorSpecialization = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await query(
+      `SELECT d.id, d.specialization,
+              CONCAT(COALESCE(u.first_name, d.first_name), ' ', COALESCE(u.last_name, d.last_name)) AS doctor_name
+       FROM doctors d
+       LEFT JOIN users u ON u.id = d.user_id
+       WHERE d.id = $1`,
+      [req.params.id],
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /doctors/specializations — get all distinct specializations
+export const getAllSpecializations = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await query(
+      `SELECT DISTINCT specialization
+       FROM doctors
+       WHERE specialization IS NOT NULL AND specialization <> ''
+       ORDER BY specialization ASC`,
+    );
+
+    res.json({ success: true, data: result.rows.map(r => r.specialization) });
+  } catch (err) {
+    next(err);
+  }
+};

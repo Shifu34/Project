@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getDoctorBookedAppointments = exports.deleteDoctorSchedule = exports.updateDoctorSchedule = exports.getDoctorAvailableSlots = exports.addDoctorSchedule = exports.upsertDoctorProfileByDoctor = exports.getDoctorScheduleByDate = exports.getDoctorProfile = exports.searchAvailableDoctors = exports.searchDoctors = exports.getDoctorAppointments = exports.updateDoctor = exports.createDoctor = exports.getDoctorByUserId = exports.getDoctorById = exports.getDoctors = void 0;
+exports.getAllSpecializations = exports.getDoctorSpecialization = exports.getDoctorBookedAppointments = exports.deleteDoctorSchedule = exports.updateDoctorSchedule = exports.getDoctorAvailableSlots = exports.addDoctorSchedule = exports.upsertDoctorProfileByDoctor = exports.getDoctorScheduleByDate = exports.getDoctorProfile = exports.searchAvailableDoctors = exports.searchDoctors = exports.getDoctorAppointments = exports.updateDoctor = exports.createDoctor = exports.getDoctorByUserId = exports.getDoctorById = exports.getDoctors = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 const canDoctorManageProfile = async (req, doctorId) => {
@@ -754,4 +754,37 @@ const getDoctorBookedAppointments = async (req, res, next) => {
     }
 };
 exports.getDoctorBookedAppointments = getDoctorBookedAppointments;
+// GET /doctors/:id/specialization — get a specific doctor's specialization
+const getDoctorSpecialization = async (req, res, next) => {
+    try {
+        const result = await (0, database_1.query)(`SELECT d.id, d.specialization,
+              CONCAT(COALESCE(u.first_name, d.first_name), ' ', COALESCE(u.last_name, d.last_name)) AS doctor_name
+       FROM doctors d
+       LEFT JOIN users u ON u.id = d.user_id
+       WHERE d.id = $1`, [req.params.id]);
+        if (result.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'Doctor not found' });
+            return;
+        }
+        res.json({ success: true, data: result.rows[0] });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getDoctorSpecialization = getDoctorSpecialization;
+// GET /doctors/specializations — get all distinct specializations
+const getAllSpecializations = async (_req, res, next) => {
+    try {
+        const result = await (0, database_1.query)(`SELECT DISTINCT specialization
+       FROM doctors
+       WHERE specialization IS NOT NULL AND specialization <> ''
+       ORDER BY specialization ASC`);
+        res.json({ success: true, data: result.rows.map(r => r.specialization) });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getAllSpecializations = getAllSpecializations;
 //# sourceMappingURL=doctor.controller.js.map

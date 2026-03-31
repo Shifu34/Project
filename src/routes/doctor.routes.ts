@@ -10,12 +10,14 @@ router.use(authenticate);
 
 router.get('/search', doctorCtrl.searchDoctors);
 router.get('/search-available', doctorCtrl.searchAvailableDoctors);
+router.get('/specializations', doctorCtrl.getAllSpecializations);
 router.get('/',    doctorCtrl.getDoctors);
 router.get('/me',  doctorCtrl.getDoctorByUserId);
 router.get('/:id/profile', doctorCtrl.getDoctorProfile);
 router.get('/:id/schedule', doctorCtrl.getDoctorScheduleByDate);
 router.get('/:id/available-slots', doctorCtrl.getDoctorAvailableSlots);
 router.get('/:id/booked-appointments', doctorCtrl.getDoctorBookedAppointments);
+router.get('/:id/specialization', doctorCtrl.getDoctorSpecialization);
 router.get('/:id', doctorCtrl.getDoctorById);
 router.get('/:id/appointments', doctorCtrl.getDoctorAppointments);
 
