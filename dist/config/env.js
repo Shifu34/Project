@@ -19,5 +19,7 @@ exports.env = {
     gmailAppPassword: process.env.GMAIL_APP_PASSWORD || '',
     hmsManagementToken: process.env.HMS_MANAGEMENT_TOKEN || '',
     hmsTemplateId: process.env.HMS_TEMPLATE_ID || '69ca5cc06cb1ece855eaf872',
+    hmsAccessKey: process.env.HMS_ACCESS_KEY || '',
+    hmsAppSecret: process.env.HMS_APP_SECRET || '',
 };
 //# sourceMappingURL=env.js.map

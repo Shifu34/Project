@@ -3,8 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallRoom = exports.createCallRoom = void 0;
+exports.listRooms = exports.getRoomDetail = exports.updateRoomStatus = exports.getAppointmentVideo = exports.generateToken = exports.getCallRoom = exports.createCallRoom = void 0;
 const https_1 = __importDefault(require("https"));
+const crypto_1 = __importDefault(require("crypto"));
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = require("../config/database");
 const env_1 = require("../config/env");
 // ── helper: make JSON request to 100ms API ─────────────────────
@@ -108,4 +110,102 @@ const getCallRoom = async (req, res, next) => {
     }
 };
 exports.getCallRoom = getCallRoom;
+// ── POST /calls/token  — generate 100ms auth token ────────────
+const generateToken = async (req, res, next) => {
+    try {
+        const { room_id, user_id, role } = req.body;
+        if (!room_id || !user_id || !role) {
+            res.status(400).json({ success: false, message: 'room_id, user_id, and role are required' });
+            return;
+        }
+        const now = Math.floor(Date.now() / 1000);
+        const payload = {
+            access_key: env_1.env.hmsAccessKey,
+            room_id,
+            user_id,
+            role,
+            type: 'app',
+            version: 2,
+            iat: now,
+            nbf: now,
+            exp: now + 86400, // 24 hours
+            jti: crypto_1.default.randomUUID(),
+        };
+        const token = jsonwebtoken_1.default.sign(payload, env_1.env.hmsAppSecret, { algorithm: 'HS256' });
+        res.json({ success: true, token });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.generateToken = generateToken;
+// ── GET /appointments/:appointment_id/video  — video call detail ──
+const getAppointmentVideo = async (req, res, next) => {
+    try {
+        const { appointment_id } = req.params;
+        const result = await (0, database_1.query)(`SELECT id, appointment_id, room_id, doctor_room_code, patient_room_code
+       FROM video_call_rooms WHERE appointment_id = $1`, [appointment_id]);
+        if (result.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'No video call found for this appointment' });
+            return;
+        }
+        res.json({ success: true, data: result.rows[0] });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getAppointmentVideo = getAppointmentVideo;
+// ── PATCH /calls/room/:appointment_id/status  — enable/disable room ──
+const updateRoomStatus = async (req, res, next) => {
+    try {
+        const { appointment_id } = req.params;
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+            res.status(400).json({ success: false, message: 'enabled (boolean) is required' });
+            return;
+        }
+        const roomResult = await (0, database_1.query)(`SELECT room_id FROM video_call_rooms WHERE appointment_id = $1`, [appointment_id]);
+        if (roomResult.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'No call room found for this appointment' });
+            return;
+        }
+        const roomId = roomResult.rows[0].room_id;
+        const data = await hmsRequest('POST', `/v2/rooms/${roomId}`, { enabled });
+        res.json({ success: true, data });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.updateRoomStatus = updateRoomStatus;
+// ── GET /calls/room/:appointment_id/detail  — get 100ms room detail ──
+const getRoomDetail = async (req, res, next) => {
+    try {
+        const { appointment_id } = req.params;
+        const roomResult = await (0, database_1.query)(`SELECT room_id FROM video_call_rooms WHERE appointment_id = $1`, [appointment_id]);
+        if (roomResult.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'No call room found for this appointment' });
+            return;
+        }
+        const roomId = roomResult.rows[0].room_id;
+        const data = await hmsRequest('GET', `/v2/rooms/${roomId}`);
+        res.json({ success: true, data });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getRoomDetail = getRoomDetail;
+// ── GET /calls/rooms  — list all 100ms rooms ─────────────────
+const listRooms = async (_req, res, next) => {
+    try {
+        const data = await hmsRequest('GET', '/v2/rooms');
+        res.json({ success: true, data });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.listRooms = listRooms;
 //# sourceMappingURL=call.controller.js.map

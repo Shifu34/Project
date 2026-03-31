@@ -1,5 +1,7 @@
 import { Response, NextFunction } from 'express';
 import https from 'https';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
 import { env } from '../config/env';
 import { AuthRequest } from '../middleware/auth.middleware';
@@ -127,6 +129,119 @@ export const getCallRoom = async (req: AuthRequest, res: Response, next: NextFun
     }
 
     res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── POST /calls/token  — generate 100ms auth token ────────────
+export const generateToken = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { room_id, user_id, role } = req.body;
+
+    if (!room_id || !user_id || !role) {
+      res.status(400).json({ success: false, message: 'room_id, user_id, and role are required' });
+      return;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      access_key: env.hmsAccessKey,
+      room_id,
+      user_id,
+      role,
+      type: 'app',
+      version: 2,
+      iat: now,
+      nbf: now,
+      exp: now + 86400, // 24 hours
+      jti: crypto.randomUUID(),
+    };
+
+    const token = jwt.sign(payload, env.hmsAppSecret, { algorithm: 'HS256' });
+    res.json({ success: true, token });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /appointments/:appointment_id/video  — video call detail ──
+export const getAppointmentVideo = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { appointment_id } = req.params;
+
+    const result = await query(
+      `SELECT id, appointment_id, room_id, doctor_room_code, patient_room_code
+       FROM video_call_rooms WHERE appointment_id = $1`,
+      [appointment_id],
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'No video call found for this appointment' });
+      return;
+    }
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── PATCH /calls/room/:appointment_id/status  — enable/disable room ──
+export const updateRoomStatus = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { appointment_id } = req.params;
+    const { enabled } = req.body;
+
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({ success: false, message: 'enabled (boolean) is required' });
+      return;
+    }
+
+    const roomResult = await query(
+      `SELECT room_id FROM video_call_rooms WHERE appointment_id = $1`,
+      [appointment_id],
+    );
+    if (roomResult.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'No call room found for this appointment' });
+      return;
+    }
+
+    const roomId = roomResult.rows[0].room_id;
+    const data = await hmsRequest<Record<string, unknown>>('POST', `/v2/rooms/${roomId}`, { enabled });
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /calls/room/:appointment_id/detail  — get 100ms room detail ──
+export const getRoomDetail = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { appointment_id } = req.params;
+
+    const roomResult = await query(
+      `SELECT room_id FROM video_call_rooms WHERE appointment_id = $1`,
+      [appointment_id],
+    );
+    if (roomResult.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'No call room found for this appointment' });
+      return;
+    }
+
+    const roomId = roomResult.rows[0].room_id;
+    const data = await hmsRequest<Record<string, unknown>>('GET', `/v2/rooms/${roomId}`);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /calls/rooms  — list all 100ms rooms ─────────────────
+export const listRooms = async (_req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = await hmsRequest<Record<string, unknown>>('GET', '/v2/rooms');
+    res.json({ success: true, data });
   } catch (err) {
     next(err);
   }

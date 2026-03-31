@@ -11,5 +11,7 @@ export declare const env: {
     gmailAppPassword: string;
     hmsManagementToken: string;
     hmsTemplateId: string;
+    hmsAccessKey: string;
+    hmsAppSecret: string;
 };
 //# sourceMappingURL=env.d.ts.map

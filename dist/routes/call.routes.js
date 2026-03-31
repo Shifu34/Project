@@ -42,7 +42,15 @@ const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 // Create a 100ms room for an appointment
 router.post('/room', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), (0, express_validator_1.body)('appointment_id').isInt(), validate_middleware_1.validate, callCtrl.createCallRoom);
+// Generate 100ms auth token
+router.post('/token', (0, express_validator_1.body)('room_id').isString().notEmpty(), (0, express_validator_1.body)('user_id').isString().notEmpty(), (0, express_validator_1.body)('role').isIn(['doctor', 'patient']), validate_middleware_1.validate, callCtrl.generateToken);
 // Get existing room info by appointment id
 router.get('/room/:appointment_id', callCtrl.getCallRoom);
+// Update room enabled/disabled status
+router.patch('/room/:appointment_id/status', (0, auth_middleware_1.authorize)('admin', 'doctor'), callCtrl.updateRoomStatus);
+// Get 100ms room detail
+router.get('/room/:appointment_id/detail', callCtrl.getRoomDetail);
+// List all 100ms rooms
+router.get('/rooms', (0, auth_middleware_1.authorize)('admin'), callCtrl.listRooms);
 exports.default = router;
 //# sourceMappingURL=call.routes.js.map
