@@ -2,6 +2,7 @@ import app from './app';
 import { env } from './config/env';
 import pool from './config/database';
 import logger from './config/logger';
+import { startPaymentTimeoutJob } from './jobs/appointmentPaymentTimeout';
 
 const start = async () => {
   // Verify DB connection
@@ -13,6 +14,9 @@ const start = async () => {
     logger.error('Failed to connect to PostgreSQL', err);
     process.exit(1);
   }
+
+  // Start background jobs
+  startPaymentTimeoutJob();
 
   const server = app.listen(env.port, () => {
     logger.info(`Murshid Hospital API running on port ${env.port} [${env.nodeEnv}]`);
