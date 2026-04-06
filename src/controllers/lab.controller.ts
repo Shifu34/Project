@@ -1,10 +1,46 @@
 import { Request, Response, NextFunction } from 'express';
 import { query, getClient } from '../config/database';
 
-// GET /lab/tests  – catalog
-export const getLabTests = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+// GET /lab/tests?search=  – single global search across name, code, category, description
+export const getLabTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const result = await query(`SELECT * FROM lab_test_catalog WHERE is_active = TRUE ORDER BY category, name`);
+    const search = (req.query.search as string || '').trim();
+
+    const params: unknown[] = [];
+    let where = `WHERE is_active = TRUE`;
+
+    if (search) {
+      params.push(`%${search}%`);
+      where += ` AND (name ILIKE $1 OR code ILIKE $1 OR category ILIKE $1 OR description ILIKE $1)`;
+    }
+
+    const result = await query(
+      `SELECT * FROM lab_test_catalog ${where} ORDER BY category, name`,
+      params,
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /lab/radiology-tests?search=  – single global search across name, code, modality, description
+export const getRadiologyTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const search = (req.query.search as string || '').trim();
+
+    const params: unknown[] = [];
+    let where = `WHERE is_active = TRUE`;
+
+    if (search) {
+      params.push(`%${search}%`);
+      where += ` AND (name ILIKE $1 OR code ILIKE $1 OR modality ILIKE $1 OR description ILIKE $1)`;
+    }
+
+    const result = await query(
+      `SELECT * FROM radiology_test_catalog ${where} ORDER BY modality, name`,
+      params,
+    );
     res.json({ success: true, data: result.rows });
   } catch (err) {
     next(err);

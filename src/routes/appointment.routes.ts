@@ -15,6 +15,20 @@ router.get('/categories',       apptCtrl.getAppointmentCategories);
 router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
 router.get('/:id',              apptCtrl.getAppointmentById);
 
+router.get('/:id/encounter',
+  apptCtrl.getAppointmentEncounter,
+);
+
+router.post('/:id/encounter',
+  authorize('admin', 'doctor'),
+  apptCtrl.saveAppointmentEncounter,
+);
+
+router.put('/:id/encounter',
+  authorize('admin', 'doctor'),
+  apptCtrl.updateAppointmentEncounter,
+);
+
 router.post('/',
   authorize('admin', 'doctor', 'patient'),
   body('patient_id').isInt(),

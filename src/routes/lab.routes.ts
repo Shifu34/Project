@@ -8,9 +8,10 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/tests',                       labCtrl.getLabTests);
-router.get('/orders',                      labCtrl.getLabOrders);
-router.get('/orders/:id',                  labCtrl.getLabOrderById);
+router.get('/tests',            labCtrl.getLabTests);
+router.get('/radiology-tests',  labCtrl.getRadiologyTests);
+router.get('/orders',           labCtrl.getLabOrders);
+router.get('/orders/:id',       labCtrl.getLabOrderById);
 
 router.post('/orders',
   authorize('admin', 'doctor'),
