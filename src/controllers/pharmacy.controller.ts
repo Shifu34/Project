@@ -9,16 +9,25 @@ export const getInventory = async (req: Request, res: Response, next: NextFuncti
     const search = (req.query.search as string || '').trim();
     const offset = (page - 1) * limit;
 
-    const where = search ? `WHERE (name ILIKE $3 OR generic_name ILIKE $3)` : '';
-    const params: unknown[] = [limit, offset];
-    if (search) params.push(`%${search}%`);
+    const dataParams: unknown[]  = [limit, offset];
+    const countParams: unknown[] = [];
+    let where = '';
+
+    if (search) {
+      where = `WHERE (name ILIKE $3 OR generic_name ILIKE $3)`;
+      dataParams.push(`%${search}%`);
+      countParams.push(`%${search}%`);
+      where = where.replace('$3', '$3'); // data query: $1=limit,$2=offset,$3=search
+    }
+
+    const countWhere = search ? `WHERE (name ILIKE $1 OR generic_name ILIKE $1)` : '';
 
     const [dataRes, countRes] = await Promise.all([
       query(
         `SELECT * FROM inventory_items ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
-        params,
+        dataParams,
       ),
-      query(`SELECT COUNT(*) FROM inventory_items ${where}`, search ? [`%${search}%`] : []),
+      query(`SELECT COUNT(*) FROM inventory_items ${countWhere}`, countParams),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
