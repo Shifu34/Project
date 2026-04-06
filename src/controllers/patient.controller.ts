@@ -394,42 +394,216 @@ export const getPatientVisits = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// GET /patients/:id/medical-history  (diagnoses + prescriptions)
+// GET /patients/:id/medical-history
 export const getPatientMedicalHistory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const [diagRes, prescRes, labRes] = await Promise.all([
+    const patientId = req.params.id;
+
+    // 1. Patient demographics
+    const patientRes = await query(
+      `SELECT p.id, p.patient_code, p.first_name, p.last_name,
+              p.gender, p.date_of_birth,
+              DATE_PART('year', AGE(p.date_of_birth))::INT AS age,
+              p.blood_type, p.phone, p.email, p.address,
+              p.emergency_contact_name, p.emergency_contact_phone,
+              p.marital_status, p.occupation, p.nationality, p.status
+       FROM patients p WHERE p.id = $1`,
+      [patientId],
+    );
+
+    if (patientRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Patient not found' });
+      return;
+    }
+
+    // 2. Insurance
+    const [
+      insuranceRes,
+      encountersRes,
+      diagnosesRes,
+      vitalsRes,
+      prescriptionsRes,
+      labOrdersRes,
+      radiologyOrdersRes,
+    ] = await Promise.all([
+      // Insurance
       query(
-        `SELECT diag.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
+        `SELECT ui.*, ip.name AS provider_name, ip.contact_phone AS provider_phone
+         FROM user_insurances ui
+         JOIN insurance_providers ip ON ip.id = ui.insurance_provider_id
+         WHERE ui.patient_id = $1
+         ORDER BY ui.is_primary DESC, ui.valid_from DESC`,
+        [patientId],
+      ),
+
+      // Encounters (full SOAP)
+      query(
+        `SELECT e.*,
+                COALESCE(d.first_name || ' ' || d.last_name,
+                         u.first_name || ' ' || u.last_name) AS doctor_name,
+                d.specialization AS doctor_specialization,
+                dept.name AS department_name
+         FROM encounters e
+         JOIN doctors d ON d.id = e.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN departments dept ON dept.id = (
+             SELECT department_id FROM appointments WHERE id = e.appointment_id LIMIT 1
+         )
+         WHERE e.patient_id = $1
+         ORDER BY e.encounter_date DESC`,
+        [patientId],
+      ),
+
+      // Diagnoses
+      query(
+        `SELECT diag.*,
+                COALESCE(d.first_name || ' ' || d.last_name,
+                         u.first_name || ' ' || u.last_name) AS doctor_name
          FROM diagnoses diag
-         JOIN doctors doc ON doc.id = diag.doctor_id
-         JOIN users u ON u.id = doc.user_id
+         JOIN doctors d ON d.id = diag.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
          WHERE diag.patient_id = $1
          ORDER BY diag.diagnosed_date DESC`,
-        [req.params.id],
+        [patientId],
       ),
+
+      // Vitals (all recorded)
       query(
-        `SELECT p.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
+        `SELECT v.*,
+                CONCAT(u.first_name, ' ', u.last_name) AS recorded_by_name
+         FROM vitals v
+         LEFT JOIN users u ON u.id = v.recorded_by
+         WHERE v.patient_id = $1
+         ORDER BY v.recorded_at DESC`,
+        [patientId],
+      ),
+
+      // Prescriptions with items
+      query(
+        `SELECT p.*,
+                COALESCE(d.first_name || ' ' || d.last_name,
+                         u.first_name || ' ' || u.last_name) AS doctor_name,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',              pi.id,
+                    'medication_name', pi.medication_name,
+                    'dosage',          pi.dosage,
+                    'frequency',       pi.frequency,
+                    'duration',        pi.duration,
+                    'quantity',        pi.quantity,
+                    'route',           pi.route,
+                    'instructions',    pi.instructions,
+                    'is_dispensed',    pi.is_dispensed
+                  ) ORDER BY pi.id
+                ) AS items
          FROM prescriptions p
-         JOIN doctors doc ON doc.id = p.doctor_id
-         JOIN users u ON u.id = doc.user_id
+         JOIN doctors d ON d.id = p.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
          WHERE p.patient_id = $1
+         GROUP BY p.id, d.first_name, d.last_name, u.first_name, u.last_name
          ORDER BY p.prescription_date DESC`,
-        [req.params.id],
+        [patientId],
       ),
+
+      // Lab orders with test results
       query(
-        `SELECT lo.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
+        `SELECT lo.*,
+                COALESCE(d.first_name || ' ' || d.last_name,
+                         u.first_name || ' ' || u.last_name) AS doctor_name,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',             loi.id,
+                    'test_name',      ltc.name,
+                    'test_code',      ltc.code,
+                    'category',       ltc.category,
+                    'status',         loi.status,
+                    'result_value',   loi.result_value,
+                    'unit',           loi.unit,
+                    'normal_range',   loi.normal_range,
+                    'interpretation', loi.interpretation,
+                    'result_notes',   loi.result_notes,
+                    'result_date',    loi.result_date
+                  ) ORDER BY loi.id
+                ) AS results
          FROM lab_orders lo
-         JOIN doctors doc ON doc.id = lo.doctor_id
-         JOIN users u ON u.id = doc.user_id
+         JOIN doctors d ON d.id = lo.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
+         LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
          WHERE lo.patient_id = $1
+         GROUP BY lo.id, d.first_name, d.last_name, u.first_name, u.last_name
          ORDER BY lo.order_date DESC`,
-        [req.params.id],
+        [patientId],
+      ),
+
+      // Radiology orders with findings
+      query(
+        `SELECT ro.*,
+                COALESCE(d.first_name || ' ' || d.last_name,
+                         u.first_name || ' ' || u.last_name) AS doctor_name,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',               roi.id,
+                    'test_name',        rtc.name,
+                    'modality',         rtc.modality,
+                    'status',           roi.status,
+                    'findings',         roi.findings,
+                    'impression',       roi.impression,
+                    'recommendation',   roi.recommendation,
+                    'image_url',        roi.image_url,
+                    'report_date',      roi.report_date
+                  ) ORDER BY roi.id
+                ) AS results
+         FROM radiology_orders ro
+         JOIN doctors d ON d.id = ro.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
+         LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
+         WHERE ro.patient_id = $1
+         GROUP BY ro.id, d.first_name, d.last_name, u.first_name, u.last_name
+         ORDER BY ro.order_date DESC`,
+        [patientId],
       ),
     ]);
 
+    // Attach clinical notes to each encounter
+    const encounterIds: number[] = encountersRes.rows.map((e: any) => e.id);
+    let clinicalNotesMap: Record<number, any[]> = {};
+
+    if (encounterIds.length > 0) {
+      const notesRes = await query(
+        `SELECT cn.*,
+                CONCAT(u.first_name, ' ', u.last_name) AS doctor_name
+         FROM clinical_notes cn
+         JOIN users u ON u.id = cn.doctor_id
+         WHERE cn.encounter_id = ANY($1::int[])
+         ORDER BY cn.created_at ASC`,
+        [encounterIds],
+      );
+      for (const note of notesRes.rows) {
+        if (!clinicalNotesMap[note.encounter_id]) clinicalNotesMap[note.encounter_id] = [];
+        clinicalNotesMap[note.encounter_id].push(note);
+      }
+    }
+
+    const encounters = encountersRes.rows.map((e: any) => ({
+      ...e,
+      clinical_notes: clinicalNotesMap[e.id] ?? [],
+    }));
+
     res.json({
       success: true,
-      data: { diagnoses: diagRes.rows, prescriptions: prescRes.rows, lab_orders: labRes.rows },
+      data: {
+        patient:          patientRes.rows[0],
+        insurance:        insuranceRes.rows,
+        encounters,
+        diagnoses:        diagnosesRes.rows,
+        vitals:           vitalsRes.rows,
+        prescriptions:    prescriptionsRes.rows,
+        lab_orders:       labOrdersRes.rows,
+        radiology_orders: radiologyOrdersRes.rows,
+      },
     });
   } catch (err) {
     next(err);
