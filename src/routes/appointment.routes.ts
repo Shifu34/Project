@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticate);
 
 // Fixed path routes first (before /:id)
+router.get('/',                 authorize('admin', 'doctor'), apptCtrl.getAppointments);
 router.get('/me',               apptCtrl.getMyAppointments);
 router.get('/upcoming',         apptCtrl.getUpcomingAppointment);
 router.get('/categories',       apptCtrl.getAppointmentCategories);

@@ -13,5 +13,6 @@ export declare const env: {
     hmsTemplateId: string;
     hmsAccessKey: string;
     hmsAppSecret: string;
+    paymentTimeoutMs: number;
 };
 //# sourceMappingURL=env.d.ts.map

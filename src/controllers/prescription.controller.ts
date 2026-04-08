@@ -73,6 +73,70 @@ export const getPrescriptionById = async (req: Request, res: Response, next: Nex
   }
 };
 
+// GET /prescriptions/active?user_id=  – all active medications for a patient (across all doctors)
+export const getActivePatientMedications = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = parseInt(req.query.user_id as string, 10);
+    if (!userId || isNaN(userId)) {
+      res.status(400).json({ success: false, message: 'user_id query param is required' });
+      return;
+    }
+
+    // Resolve patient from user_id
+    const patientRes = await query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
+    if (patientRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Patient not found for this user' });
+      return;
+    }
+    const patientId = patientRes.rows[0].id;
+
+    const [prescRes, itemsRes] = await Promise.all([
+      query(
+        `SELECT p.id, p.prescription_date, p.valid_until, p.status, p.notes,
+                CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+                d.specialization
+         FROM prescriptions p
+         JOIN doctors d ON d.id = p.doctor_id
+         JOIN users u ON u.id = d.user_id
+         WHERE p.patient_id = $1
+           AND p.status = 'active'
+           AND (p.valid_until IS NULL OR p.valid_until >= CURRENT_DATE)
+         ORDER BY p.prescription_date DESC`,
+        [patientId],
+      ),
+      query(
+        `SELECT pi.*, inv.generic_name, inv.dosage_form, inv.strength,
+                p.id AS prescription_id
+         FROM prescription_items pi
+         JOIN prescriptions p ON p.id = pi.prescription_id
+         LEFT JOIN inventory_items inv ON inv.id = pi.inventory_item_id
+         WHERE p.patient_id = $1
+           AND p.status = 'active'
+           AND (p.valid_until IS NULL OR p.valid_until >= CURRENT_DATE)`,
+        [patientId],
+      ),
+    ]);
+
+    // Attach items to each prescription
+    const itemsByPrescription: Record<number, unknown[]> = {};
+    for (const item of itemsRes.rows) {
+      if (!itemsByPrescription[item.prescription_id]) {
+        itemsByPrescription[item.prescription_id] = [];
+      }
+      itemsByPrescription[item.prescription_id].push(item);
+    }
+
+    const data = prescRes.rows.map((p) => ({
+      ...p,
+      items: itemsByPrescription[p.id] ?? [],
+    }));
+
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // GET /prescriptions  – filtered list
 export const getPrescriptions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -82,8 +146,10 @@ export const getPrescriptions = async (req: Request, res: Response, next: NextFu
     const offset    = (page - 1) * limit;
 
     const params: unknown[] = [limit, offset];
+    const countParams: unknown[] = [];
     const where = patientId ? `WHERE p.patient_id = $3` : '';
-    if (patientId) params.push(patientId);
+    const countWhere = patientId ? `WHERE p.patient_id = $1` : '';
+    if (patientId) { params.push(patientId); countParams.push(patientId); }
 
     const [dataRes, countRes] = await Promise.all([
       query(
@@ -97,7 +163,7 @@ export const getPrescriptions = async (req: Request, res: Response, next: NextFu
          ORDER BY p.prescription_date DESC LIMIT $1 OFFSET $2`,
         params,
       ),
-      query(`SELECT COUNT(*) FROM prescriptions p ${where}`, patientId ? [patientId] : []),
+      query(`SELECT COUNT(*) FROM prescriptions p ${countWhere}`, countParams),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);

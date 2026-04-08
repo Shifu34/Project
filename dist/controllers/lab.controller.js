@@ -1,11 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getLabOrders = exports.verifyLabResult = exports.enterLabResult = exports.getLabOrderById = exports.createLabOrder = exports.getLabTests = void 0;
+exports.getLabOrders = exports.verifyLabResult = exports.enterLabResult = exports.getLabOrderById = exports.createLabOrder = exports.getRadiologyTests = exports.getLabTests = void 0;
 const database_1 = require("../config/database");
-// GET /lab/tests  – catalog
-const getLabTests = async (_req, res, next) => {
+// GET /lab/tests?search=  – single global search across name, code, category, description
+const getLabTests = async (req, res, next) => {
     try {
-        const result = await (0, database_1.query)(`SELECT * FROM lab_test_catalog WHERE is_active = TRUE ORDER BY category, name`);
+        const search = (req.query.search || '').trim();
+        const params = [];
+        let where = `WHERE is_active = TRUE`;
+        if (search) {
+            params.push(`%${search}%`);
+            where += ` AND (name ILIKE $1 OR code ILIKE $1 OR category ILIKE $1 OR description ILIKE $1)`;
+        }
+        const result = await (0, database_1.query)(`SELECT * FROM lab_test_catalog ${where} ORDER BY category, name`, params);
         res.json({ success: true, data: result.rows });
     }
     catch (err) {
@@ -13,6 +20,24 @@ const getLabTests = async (_req, res, next) => {
     }
 };
 exports.getLabTests = getLabTests;
+// GET /lab/radiology-tests?search=  – single global search across name, code, modality, description
+const getRadiologyTests = async (req, res, next) => {
+    try {
+        const search = (req.query.search || '').trim();
+        const params = [];
+        let where = `WHERE is_active = TRUE`;
+        if (search) {
+            params.push(`%${search}%`);
+            where += ` AND (name ILIKE $1 OR code ILIKE $1 OR modality ILIKE $1 OR description ILIKE $1)`;
+        }
+        const result = await (0, database_1.query)(`SELECT * FROM radiology_test_catalog ${where} ORDER BY modality, name`, params);
+        res.json({ success: true, data: result.rows });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getRadiologyTests = getRadiologyTests;
 // POST /lab/orders
 const createLabOrder = async (req, res, next) => {
     const client = await (0, database_1.getClient)();

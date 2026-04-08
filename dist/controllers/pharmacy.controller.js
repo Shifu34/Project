@@ -9,13 +9,19 @@ const getInventory = async (req, res, next) => {
         const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
         const search = (req.query.search || '').trim();
         const offset = (page - 1) * limit;
-        const where = search ? `WHERE (name ILIKE $3 OR generic_name ILIKE $3)` : '';
-        const params = [limit, offset];
-        if (search)
-            params.push(`%${search}%`);
+        const dataParams = [limit, offset];
+        const countParams = [];
+        let where = '';
+        if (search) {
+            where = `WHERE (name ILIKE $3 OR generic_name ILIKE $3)`;
+            dataParams.push(`%${search}%`);
+            countParams.push(`%${search}%`);
+            where = where.replace('$3', '$3'); // data query: $1=limit,$2=offset,$3=search
+        }
+        const countWhere = search ? `WHERE (name ILIKE $1 OR generic_name ILIKE $1)` : '';
         const [dataRes, countRes] = await Promise.all([
-            (0, database_1.query)(`SELECT * FROM inventory_items ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`, params),
-            (0, database_1.query)(`SELECT COUNT(*) FROM inventory_items ${where}`, search ? [`%${search}%`] : []),
+            (0, database_1.query)(`SELECT * FROM inventory_items ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`, dataParams),
+            (0, database_1.query)(`SELECT COUNT(*) FROM inventory_items ${countWhere}`, countParams),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({ success: true, data: dataRes.rows, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } });

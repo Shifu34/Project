@@ -40,6 +40,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
+router.get('/active', prescCtrl.getActivePatientMedications);
 router.get('/', prescCtrl.getPrescriptions);
 router.get('/:id', prescCtrl.getPrescriptionById);
 router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('encounter_id').isInt(), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('items').isArray({ min: 1 }), validate_middleware_1.validate, prescCtrl.createPrescription);

@@ -41,6 +41,7 @@ const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 router.get('/tests', labCtrl.getLabTests);
+router.get('/radiology-tests', labCtrl.getRadiologyTests);
 router.get('/orders', labCtrl.getLabOrders);
 router.get('/orders/:id', labCtrl.getLabOrderById);
 router.post('/orders', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('encounter_id').isInt(), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('test_ids').isArray({ min: 1 }), validate_middleware_1.validate, labCtrl.createLabOrder);

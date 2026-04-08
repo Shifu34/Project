@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../config/database';
+import { AuthRequest } from '../middleware/auth.middleware';
 
 // GET /billing/payments
 export const getPayments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -69,16 +70,43 @@ export const getPaymentById = async (req: Request, res: Response, next: NextFunc
 };
 
 // POST /billing/payments
-export const recordPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+// Role behaviour:
+//   patient  — patient_id resolved from their own profile; received_by is NULL
+//   doctor   — patient_id must be passed in body; received_by set to doctor's user_id
+//   admin    — patient_id must be passed in body; received_by set to admin's user_id
+export const recordPayment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { appointment_id, patient_id, amount, payment_method, transaction_reference, notes } = req.body;
-    const receivedBy = (req as Request & { user?: { userId: number } }).user?.userId;
+    const { appointment_id, amount, payment_method, transaction_reference, notes } = req.body;
+    const caller = req.user!;
+
+    let patientId: number;
+    let receivedBy: number | null;
+
+    if (caller.roleName === 'patient') {
+      // Resolve patient from authenticated user
+      const patRes = await query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [caller.userId]);
+      if (patRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Patient profile not found' });
+        return;
+      }
+      patientId = patRes.rows[0].id;
+      receivedBy = null; // self-pay; no staff received
+    } else {
+      // Admin or doctor — patient_id must be supplied
+      const bodyPatientId = parseInt(req.body.patient_id, 10);
+      if (!bodyPatientId || isNaN(bodyPatientId)) {
+        res.status(400).json({ success: false, message: 'patient_id is required' });
+        return;
+      }
+      patientId = bodyPatientId;
+      receivedBy = caller.userId;
+    }
 
     const result = await query(
       `INSERT INTO payments
          (appointment_id, patient_id, amount, payment_method, transaction_reference, received_by, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [appointment_id, patient_id, amount, payment_method, transaction_reference, receivedBy, notes],
+      [appointment_id ?? null, patientId, amount, payment_method, transaction_reference ?? null, receivedBy, notes ?? null],
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });

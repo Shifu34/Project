@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPrescriptions = exports.getPrescriptionById = exports.createPrescription = void 0;
+exports.getPrescriptions = exports.getActivePatientMedications = exports.getPrescriptionById = exports.createPrescription = void 0;
 const database_1 = require("../config/database");
 // POST /prescriptions
 const createPrescription = async (req, res, next) => {
@@ -59,6 +59,60 @@ const getPrescriptionById = async (req, res, next) => {
     }
 };
 exports.getPrescriptionById = getPrescriptionById;
+// GET /prescriptions/active?user_id=  – all active medications for a patient (across all doctors)
+const getActivePatientMedications = async (req, res, next) => {
+    try {
+        const userId = parseInt(req.query.user_id, 10);
+        if (!userId || isNaN(userId)) {
+            res.status(400).json({ success: false, message: 'user_id query param is required' });
+            return;
+        }
+        // Resolve patient from user_id
+        const patientRes = await (0, database_1.query)(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
+        if (patientRes.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'Patient not found for this user' });
+            return;
+        }
+        const patientId = patientRes.rows[0].id;
+        const [prescRes, itemsRes] = await Promise.all([
+            (0, database_1.query)(`SELECT p.id, p.prescription_date, p.valid_until, p.status, p.notes,
+                CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+                d.specialization
+         FROM prescriptions p
+         JOIN doctors d ON d.id = p.doctor_id
+         JOIN users u ON u.id = d.user_id
+         WHERE p.patient_id = $1
+           AND p.status = 'active'
+           AND (p.valid_until IS NULL OR p.valid_until >= CURRENT_DATE)
+         ORDER BY p.prescription_date DESC`, [patientId]),
+            (0, database_1.query)(`SELECT pi.*, inv.generic_name, inv.dosage_form, inv.strength,
+                p.id AS prescription_id
+         FROM prescription_items pi
+         JOIN prescriptions p ON p.id = pi.prescription_id
+         LEFT JOIN inventory_items inv ON inv.id = pi.inventory_item_id
+         WHERE p.patient_id = $1
+           AND p.status = 'active'
+           AND (p.valid_until IS NULL OR p.valid_until >= CURRENT_DATE)`, [patientId]),
+        ]);
+        // Attach items to each prescription
+        const itemsByPrescription = {};
+        for (const item of itemsRes.rows) {
+            if (!itemsByPrescription[item.prescription_id]) {
+                itemsByPrescription[item.prescription_id] = [];
+            }
+            itemsByPrescription[item.prescription_id].push(item);
+        }
+        const data = prescRes.rows.map((p) => ({
+            ...p,
+            items: itemsByPrescription[p.id] ?? [],
+        }));
+        res.json({ success: true, data });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getActivePatientMedications = getActivePatientMedications;
 // GET /prescriptions  – filtered list
 const getPrescriptions = async (req, res, next) => {
     try {
@@ -67,9 +121,13 @@ const getPrescriptions = async (req, res, next) => {
         const patientId = req.query.patient_id;
         const offset = (page - 1) * limit;
         const params = [limit, offset];
+        const countParams = [];
         const where = patientId ? `WHERE p.patient_id = $3` : '';
-        if (patientId)
+        const countWhere = patientId ? `WHERE p.patient_id = $1` : '';
+        if (patientId) {
             params.push(patientId);
+            countParams.push(patientId);
+        }
         const [dataRes, countRes] = await Promise.all([
             (0, database_1.query)(`SELECT p.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 CONCAT(pt.first_name,' ',pt.last_name) AS patient_name, pt.patient_code
@@ -79,7 +137,7 @@ const getPrescriptions = async (req, res, next) => {
          JOIN patients pt ON pt.id = p.patient_id
          ${where}
          ORDER BY p.prescription_date DESC LIMIT $1 OFFSET $2`, params),
-            (0, database_1.query)(`SELECT COUNT(*) FROM prescriptions p ${where}`, patientId ? [patientId] : []),
+            (0, database_1.query)(`SELECT COUNT(*) FROM prescriptions p ${countWhere}`, countParams),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({ success: true, data: dataRes.rows, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } });

@@ -1,12 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getNatureOfVisits = exports.getAppointmentCategories = exports.cancelAppointment = exports.patchAppointment = exports.getUpcomingAppointment = exports.getMyAppointments = exports.updateAppointment = exports.updateAppointmentStatus = exports.createAppointment = exports.getAppointmentById = exports.getAppointments = void 0;
+exports.updateAppointmentEncounter = exports.saveAppointmentEncounter = exports.getAppointmentEncounter = exports.getNatureOfVisits = exports.getAppointmentCategories = exports.cancelAppointment = exports.patchAppointment = exports.getUpcomingAppointment = exports.getMyAppointments = exports.updateAppointment = exports.updateAppointmentStatus = exports.createAppointment = exports.getAppointmentById = exports.getAppointments = void 0;
 const database_1 = require("../config/database");
 // GET /appointments
 const getAppointments = async (req, res, next) => {
     try {
-        const page = Math.max(1, parseInt(req.params.page || '1', 10));
-        const size = Math.min(100, parseInt(req.params.size || '20', 10));
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const size = Math.min(100, parseInt(req.query.size || '20', 10));
         const date = req.query.date;
         const status = req.query.status;
         const offset = (page - 1) * size;
@@ -404,4 +404,464 @@ const getNatureOfVisits = async (_req, res, next) => {
     }
 };
 exports.getNatureOfVisits = getNatureOfVisits;
+// ─────────────────────────────────────────────────────────────
+// GET /appointments/:id/encounter
+// Returns the full clinical record for a given appointment:
+// encounter, vitals, diagnoses, prescriptions (with items),
+// lab orders (with results), radiology orders (with results)
+// ─────────────────────────────────────────────────────────────
+const getAppointmentEncounter = async (req, res, next) => {
+    try {
+        const appointmentId = req.params.id;
+        const encRes = await (0, database_1.query)(`SELECT e.*,
+              COALESCE(d.first_name || ' ' || d.last_name,
+                       u.first_name || ' ' || u.last_name) AS doctor_name,
+              d.specialization,
+              CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
+              p.patient_code
+       FROM encounters e
+       JOIN doctors d ON d.id = e.doctor_id
+       LEFT JOIN users u ON u.id = d.user_id
+       JOIN patients p ON p.id = e.patient_id
+       WHERE e.appointment_id = $1`, [appointmentId]);
+        if (encRes.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'No encounter found for this appointment' });
+            return;
+        }
+        const encounter = encRes.rows[0];
+        const encounterId = encounter.id;
+        const [vitalsRes, diagRes, prescRes, labRes, radioRes, notesRes] = await Promise.all([
+            (0, database_1.query)(`SELECT v.*, CONCAT(u.first_name,' ',u.last_name) AS recorded_by_name
+         FROM vitals v
+         LEFT JOIN users u ON u.id = v.recorded_by
+         WHERE v.encounter_id = $1 ORDER BY v.recorded_at DESC`, [encounterId]),
+            (0, database_1.query)(`SELECT diag.*,
+                COALESCE(d.first_name || ' ' || d.last_name,
+                         u.first_name || ' ' || u.last_name) AS doctor_name
+         FROM diagnoses diag
+         JOIN doctors d ON d.id = diag.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         WHERE diag.encounter_id = $1 ORDER BY diag.diagnosed_date DESC`, [encounterId]),
+            (0, database_1.query)(`SELECT p.*,
+                COALESCE(d.first_name || ' ' || d.last_name,
+                         u.first_name || ' ' || u.last_name) AS doctor_name,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id', pi.id, 'inventory_item_id', pi.inventory_item_id,
+                    'medication_name', pi.medication_name,
+                    'dosage', pi.dosage, 'frequency', pi.frequency,
+                    'duration', pi.duration, 'quantity', pi.quantity,
+                    'route', pi.route, 'instructions', pi.instructions,
+                    'is_dispensed', pi.is_dispensed
+                  ) ORDER BY pi.id
+                ) AS items
+         FROM prescriptions p
+         JOIN doctors d ON d.id = p.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
+         WHERE p.encounter_id = $1
+         GROUP BY p.id, d.first_name, d.last_name, u.first_name, u.last_name
+         ORDER BY p.prescription_date DESC`, [encounterId]),
+            (0, database_1.query)(`SELECT lo.*,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id', loi.id, 'test_name', ltc.name, 'test_code', ltc.code,
+                    'category', ltc.category, 'status', loi.status,
+                    'result_value', loi.result_value, 'unit', loi.unit,
+                    'normal_range', loi.normal_range, 'interpretation', loi.interpretation,
+                    'result_notes', loi.result_notes, 'result_date', loi.result_date
+                  ) ORDER BY loi.id
+                ) AS results
+         FROM lab_orders lo
+         LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
+         LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
+         WHERE lo.encounter_id = $1
+         GROUP BY lo.id ORDER BY lo.order_date DESC`, [encounterId]),
+            (0, database_1.query)(`SELECT ro.*,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id', roi.id, 'test_name', rtc.name, 'modality', rtc.modality,
+                    'status', roi.status, 'findings', roi.findings,
+                    'impression', roi.impression, 'recommendation', roi.recommendation,
+                    'image_url', roi.image_url, 'report_date', roi.report_date
+                  ) ORDER BY roi.id
+                ) AS results
+         FROM radiology_orders ro
+         LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
+         LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
+         WHERE ro.encounter_id = $1
+         GROUP BY ro.id ORDER BY ro.order_date DESC`, [encounterId]),
+            (0, database_1.query)(`SELECT cn.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
+         FROM clinical_notes cn
+         JOIN users u ON u.id = cn.doctor_id
+         WHERE cn.encounter_id = $1 ORDER BY cn.created_at ASC`, [encounterId]),
+        ]);
+        res.json({
+            success: true,
+            data: {
+                encounter: { ...encounter, clinical_notes: notesRes.rows },
+                vitals: vitalsRes.rows,
+                diagnoses: diagRes.rows,
+                prescriptions: prescRes.rows,
+                lab_orders: labRes.rows,
+                radiology_orders: radioRes.rows,
+            },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getAppointmentEncounter = getAppointmentEncounter;
+// ─────────────────────────────────────────────────────────────
+// POST /appointments/:id/encounter
+// Creates a full clinical record in one transaction:
+// encounter, vitals, diagnoses, prescriptions, lab orders, radiology orders
+//
+// Body:
+// {
+//   encounter: { encounter_type, chief_complaint, history_of_present_illness,
+//                physical_examination, assessment, plan, follow_up_date },
+//   vitals?: { temperature, blood_pressure_systolic, blood_pressure_diastolic,
+//              heart_rate, respiratory_rate, oxygen_saturation,
+//              weight, height, bmi, blood_glucose, pain_scale, notes },
+//   diagnoses?: [{ icd_code, diagnosis_text, diagnosis_type, status, notes }],
+//   prescriptions?: [{ notes, valid_until, items: [{ inventory_item_id?, medication_name, dosage,
+//                       frequency, duration, quantity, route, instructions }] }],
+//   lab_orders?: [{ priority, clinical_notes, test_ids: number[] }],
+//   radiology_orders?: [{ priority, clinical_notes, test_ids: number[] }]
+// }
+// ─────────────────────────────────────────────────────────────
+const saveAppointmentEncounter = async (req, res, next) => {
+    const client = await (0, database_1.getClient)();
+    try {
+        await client.query('BEGIN');
+        const appointmentId = req.params.id;
+        const userId = req.user?.userId;
+        // Resolve appointment → patient_id, doctor_id
+        const apptRes = await client.query(`SELECT patient_id, doctor_id FROM appointments WHERE id = $1`, [appointmentId]);
+        if (apptRes.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'Appointment not found' });
+            await client.query('ROLLBACK');
+            return;
+        }
+        const { patient_id, doctor_id } = apptRes.rows[0];
+        const { encounter: enc, vitals, diagnoses, prescriptions, lab_orders, radiology_orders, } = req.body;
+        // 1. Encounter
+        const encRow = await client.query(`INSERT INTO encounters
+         (appointment_id, patient_id, doctor_id, encounter_type,
+          chief_complaint, history_of_present_illness, physical_examination,
+          assessment, plan, follow_up_date, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'in_progress')
+       RETURNING *`, [appointmentId, patient_id, doctor_id,
+            enc?.encounter_type ?? 'outpatient',
+            enc?.chief_complaint ?? null,
+            enc?.history_of_present_illness ?? null,
+            enc?.physical_examination ?? null,
+            enc?.assessment ?? null,
+            enc?.plan ?? null,
+            enc?.follow_up_date ?? null]);
+        const encounter = encRow.rows[0];
+        const encounterId = encounter.id;
+        await client.query(`UPDATE appointments SET status = 'in_progress' WHERE id = $1`, [appointmentId]);
+        // 2. Vitals
+        if (vitals) {
+            await client.query(`INSERT INTO vitals
+           (encounter_id, patient_id, recorded_by,
+            temperature, blood_pressure_systolic, blood_pressure_diastolic,
+            heart_rate, respiratory_rate, oxygen_saturation,
+            weight, height, bmi, blood_glucose, pain_scale, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [encounterId, patient_id, userId,
+                vitals.temperature ?? null, vitals.blood_pressure_systolic ?? null,
+                vitals.blood_pressure_diastolic ?? null, vitals.heart_rate ?? null,
+                vitals.respiratory_rate ?? null, vitals.oxygen_saturation ?? null,
+                vitals.weight ?? null, vitals.height ?? null, vitals.bmi ?? null,
+                vitals.blood_glucose ?? null, vitals.pain_scale ?? null,
+                vitals.notes ?? null]);
+        }
+        // 3. Diagnoses
+        if (Array.isArray(diagnoses)) {
+            for (const d of diagnoses) {
+                await client.query(`INSERT INTO diagnoses
+             (encounter_id, patient_id, doctor_id, icd_code, diagnosis_text,
+              diagnosis_type, status, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [encounterId, patient_id, doctor_id,
+                    d.icd_code ?? null, d.diagnosis_text,
+                    d.diagnosis_type ?? 'primary', d.status ?? 'active',
+                    d.notes ?? null]);
+            }
+        }
+        // 4. Prescriptions
+        if (Array.isArray(prescriptions)) {
+            for (const pres of prescriptions) {
+                const presRow = await client.query(`INSERT INTO prescriptions
+             (encounter_id, patient_id, doctor_id, valid_until, notes)
+           VALUES ($1,$2,$3,$4,$5) RETURNING id`, [encounterId, patient_id, doctor_id,
+                    pres.valid_until ?? null, pres.notes ?? null]);
+                const presId = presRow.rows[0].id;
+                if (Array.isArray(pres.items)) {
+                    for (const item of pres.items) {
+                        await client.query(`INSERT INTO prescription_items
+                 (prescription_id, inventory_item_id, medication_name, dosage,
+                  frequency, duration, quantity, route, instructions)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [presId, item.inventory_item_id ?? null, item.medication_name,
+                            item.dosage, item.frequency, item.duration ?? null,
+                            item.quantity, item.route ?? null, item.instructions ?? null]);
+                    }
+                }
+            }
+        }
+        // 5. Lab orders
+        if (Array.isArray(lab_orders)) {
+            for (const lo of lab_orders) {
+                const loRow = await client.query(`INSERT INTO lab_orders
+             (encounter_id, patient_id, doctor_id, ordered_by, priority, clinical_notes)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [encounterId, patient_id, doctor_id, userId,
+                    lo.priority ?? 'routine', lo.clinical_notes ?? null]);
+                const loId = loRow.rows[0].id;
+                if (Array.isArray(lo.test_ids)) {
+                    for (const testId of lo.test_ids) {
+                        await client.query(`INSERT INTO lab_order_items (lab_order_id, lab_test_id) VALUES ($1,$2)`, [loId, testId]);
+                    }
+                }
+            }
+        }
+        // 6. Radiology orders
+        if (Array.isArray(radiology_orders)) {
+            for (const ro of radiology_orders) {
+                const roRow = await client.query(`INSERT INTO radiology_orders
+             (encounter_id, patient_id, doctor_id, ordered_by, priority, clinical_notes)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [encounterId, patient_id, doctor_id, userId,
+                    ro.priority ?? 'routine', ro.clinical_notes ?? null]);
+                const roId = roRow.rows[0].id;
+                if (Array.isArray(ro.test_ids)) {
+                    for (const testId of ro.test_ids) {
+                        await client.query(`INSERT INTO radiology_order_items (radiology_order_id, radiology_test_id) VALUES ($1,$2)`, [roId, testId]);
+                    }
+                }
+            }
+        }
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, data: { encounter_id: encounterId } });
+    }
+    catch (err) {
+        await client.query('ROLLBACK');
+        next(err);
+    }
+    finally {
+        client.release();
+    }
+};
+exports.saveAppointmentEncounter = saveAppointmentEncounter;
+// ─────────────────────────────────────────────────────────────
+// PUT /appointments/:id/encounter
+// Partial update — send only the sections you want to update.
+//
+// Body (all optional):
+// {
+//   encounter?: { chief_complaint, hpi, physical_examination,
+//                 assessment, plan, follow_up_date, status },
+//   vitals?: { id?: number (if omitted, inserts new row),
+//              temperature, blood_pressure_systolic, ... },
+//   diagnoses?: [{ id: number, icd_code?, diagnosis_text?, status?, notes? }],
+//   prescriptions?: [{ id: number, notes?, valid_until?, status? }],
+//   prescription_items?: [{ id: number, medication_name?, dosage?,
+//                           frequency?, duration?, quantity?,
+//                           route?, instructions?, is_dispensed? }],
+//   lab_order_items?: [{ id: number, result_value?, unit?,
+//                        normal_range?, interpretation?, result_notes? }],
+//   radiology_order_items?: [{ id: number, findings?, impression?,
+//                               recommendation?, image_url? }]
+// }
+// ─────────────────────────────────────────────────────────────
+const updateAppointmentEncounter = async (req, res, next) => {
+    const client = await (0, database_1.getClient)();
+    try {
+        await client.query('BEGIN');
+        const appointmentId = req.params.id;
+        const userId = req.user?.userId;
+        const encRes = await client.query(`SELECT id, patient_id, doctor_id FROM encounters WHERE appointment_id = $1`, [appointmentId]);
+        if (encRes.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'No encounter found for this appointment' });
+            await client.query('ROLLBACK');
+            return;
+        }
+        const { id: encounterId, patient_id, doctor_id } = encRes.rows[0];
+        const { encounter, vitals, diagnoses, prescriptions, prescription_items, lab_order_items, radiology_order_items, } = req.body;
+        // Update encounter fields
+        if (encounter) {
+            const fields = [];
+            const vals = [];
+            let i = 1;
+            const allowed = ['chief_complaint', 'history_of_present_illness', 'physical_examination',
+                'assessment', 'plan', 'follow_up_date', 'status'];
+            for (const key of allowed) {
+                if (key in encounter) {
+                    fields.push(`${key} = $${i++}`);
+                    vals.push(encounter[key]);
+                }
+            }
+            if (fields.length) {
+                vals.push(encounterId);
+                await client.query(`UPDATE encounters SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${i}`, vals);
+                if (encounter.status === 'completed') {
+                    await client.query(`UPDATE appointments SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [appointmentId]);
+                }
+            }
+        }
+        // Upsert vitals: if id given → update, else → insert
+        if (vitals) {
+            if (vitals.id) {
+                const vFields = [];
+                const vVals = [];
+                let vi = 1;
+                const vAllowed = ['temperature', 'blood_pressure_systolic', 'blood_pressure_diastolic',
+                    'heart_rate', 'respiratory_rate', 'oxygen_saturation',
+                    'weight', 'height', 'bmi', 'blood_glucose', 'pain_scale', 'notes'];
+                for (const key of vAllowed) {
+                    if (key in vitals) {
+                        vFields.push(`${key} = $${vi++}`);
+                        vVals.push(vitals[key]);
+                    }
+                }
+                if (vFields.length) {
+                    vVals.push(vitals.id);
+                    await client.query(`UPDATE vitals SET ${vFields.join(', ')} WHERE id = $${vi}`, vVals);
+                }
+            }
+            else {
+                await client.query(`INSERT INTO vitals
+             (encounter_id, patient_id, recorded_by,
+              temperature, blood_pressure_systolic, blood_pressure_diastolic,
+              heart_rate, respiratory_rate, oxygen_saturation,
+              weight, height, bmi, blood_glucose, pain_scale, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [encounterId, patient_id, userId,
+                    vitals.temperature ?? null, vitals.blood_pressure_systolic ?? null,
+                    vitals.blood_pressure_diastolic ?? null, vitals.heart_rate ?? null,
+                    vitals.respiratory_rate ?? null, vitals.oxygen_saturation ?? null,
+                    vitals.weight ?? null, vitals.height ?? null, vitals.bmi ?? null,
+                    vitals.blood_glucose ?? null, vitals.pain_scale ?? null,
+                    vitals.notes ?? null]);
+            }
+        }
+        // Update diagnoses by id
+        if (Array.isArray(diagnoses)) {
+            for (const d of diagnoses) {
+                if (!d.id)
+                    continue;
+                const dFields = [];
+                const dVals = [];
+                let di = 1;
+                for (const key of ['icd_code', 'diagnosis_text', 'diagnosis_type', 'status', 'notes']) {
+                    if (key in d) {
+                        dFields.push(`${key} = $${di++}`);
+                        dVals.push(d[key]);
+                    }
+                }
+                if (dFields.length) {
+                    dVals.push(d.id);
+                    await client.query(`UPDATE diagnoses SET ${dFields.join(', ')} WHERE id = $${di} AND encounter_id = $${di + 1}`, [...dVals, encounterId]);
+                }
+            }
+        }
+        // Update prescriptions by id
+        if (Array.isArray(prescriptions)) {
+            for (const p of prescriptions) {
+                if (!p.id)
+                    continue;
+                const pFields = [];
+                const pVals = [];
+                let pi = 1;
+                for (const key of ['notes', 'valid_until', 'status']) {
+                    if (key in p) {
+                        pFields.push(`${key} = $${pi++}`);
+                        pVals.push(p[key]);
+                    }
+                }
+                if (pFields.length) {
+                    pVals.push(p.id);
+                    await client.query(`UPDATE prescriptions SET ${pFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $${pi} AND encounter_id = $${pi + 1}`, [...pVals, encounterId]);
+                }
+            }
+        }
+        // Update prescription items by id
+        if (Array.isArray(prescription_items)) {
+            for (const item of prescription_items) {
+                if (!item.id)
+                    continue;
+                const iFields = [];
+                const iVals = [];
+                let ii = 1;
+                for (const key of ['inventory_item_id', 'medication_name', 'dosage', 'frequency', 'duration',
+                    'quantity', 'route', 'instructions', 'is_dispensed']) {
+                    if (key in item) {
+                        iFields.push(`${key} = $${ii++}`);
+                        iVals.push(item[key]);
+                    }
+                }
+                if (iFields.length) {
+                    iVals.push(item.id);
+                    await client.query(`UPDATE prescription_items SET ${iFields.join(', ')} WHERE id = $${ii}`, iVals);
+                }
+            }
+        }
+        // Update lab order items (results)
+        if (Array.isArray(lab_order_items)) {
+            for (const item of lab_order_items) {
+                if (!item.id)
+                    continue;
+                const lFields = [];
+                const lVals = [];
+                let li = 1;
+                for (const key of ['result_value', 'unit', 'normal_range', 'interpretation', 'result_notes']) {
+                    if (key in item) {
+                        lFields.push(`${key} = $${li++}`);
+                        lVals.push(item[key]);
+                    }
+                }
+                if (lFields.length) {
+                    lVals.push(item.id);
+                    await client.query(`UPDATE lab_order_items
+             SET ${lFields.join(', ')}, status = 'completed', result_date = CURRENT_TIMESTAMP,
+                 performed_by = $${li + 1}
+             WHERE id = $${li}`, [...lVals, userId]);
+                }
+            }
+        }
+        // Update radiology order items
+        if (Array.isArray(radiology_order_items)) {
+            for (const item of radiology_order_items) {
+                if (!item.id)
+                    continue;
+                const rFields = [];
+                const rVals = [];
+                let ri = 1;
+                for (const key of ['findings', 'impression', 'recommendation', 'image_url']) {
+                    if (key in item) {
+                        rFields.push(`${key} = $${ri++}`);
+                        rVals.push(item[key]);
+                    }
+                }
+                if (rFields.length) {
+                    rVals.push(item.id);
+                    await client.query(`UPDATE radiology_order_items
+             SET ${rFields.join(', ')}, status = 'completed', report_date = CURRENT_TIMESTAMP,
+                 performed_by = $${ri + 1}
+             WHERE id = $${ri}`, [...rVals, userId]);
+                }
+            }
+        }
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Encounter updated successfully' });
+    }
+    catch (err) {
+        await client.query('ROLLBACK');
+        next(err);
+    }
+    finally {
+        client.release();
+    }
+};
+exports.updateAppointmentEncounter = updateAppointmentEncounter;
 //# sourceMappingURL=appointment.controller.js.map

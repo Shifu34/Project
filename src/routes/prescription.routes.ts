@@ -8,6 +8,7 @@ const router = Router();
 
 router.use(authenticate);
 
+router.get('/active', prescCtrl.getActivePatientMedications);
 router.get('/',    prescCtrl.getPrescriptions);
 router.get('/:id', prescCtrl.getPrescriptionById);
 

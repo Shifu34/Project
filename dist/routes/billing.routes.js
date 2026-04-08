@@ -46,7 +46,7 @@ router.get('/payments/:id', billingCtrl.getPaymentById);
 // Backward-compat aliases
 router.get('/bills', billingCtrl.getPayments);
 router.get('/bills/:id', billingCtrl.getPaymentById);
-router.post('/payments', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('amount').isFloat({ min: 0.01 }), (0, express_validator_1.body)('payment_method').isIn(['cash', 'credit_card', 'debit_card', 'insurance', 'bank_transfer', 'cheque', 'online']), validate_middleware_1.validate, billingCtrl.recordPayment);
+router.post('/payments', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), (0, express_validator_1.body)('amount').isFloat({ min: 0.01 }), (0, express_validator_1.body)('payment_method').isIn(['cash', 'credit_card', 'debit_card', 'insurance', 'bank_transfer', 'cheque', 'online']), validate_middleware_1.validate, billingCtrl.recordPayment);
 router.post('/refunds', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('payment_id').isInt(), (0, express_validator_1.body)('amount').isFloat({ min: 0.01 }), validate_middleware_1.validate, billingCtrl.createRefund);
 exports.default = router;
 //# sourceMappingURL=billing.routes.js.map

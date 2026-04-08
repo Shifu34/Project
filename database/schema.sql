@@ -103,7 +103,7 @@ CREATE UNIQUE INDEX patients_cnic_uidx ON patients (cnic) WHERE cnic IS NOT NULL
 CREATE OR REPLACE FUNCTION generate_patient_code()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF NEW.patient_code IS NULL AND NEW.source_pid IS NOT NULL THEN
+    IF NEW.patient_code IS NULL THEN
         NEW.patient_code := 'MH-' || TO_CHAR(CURRENT_DATE,'YYYY') || '-'
                             || LPAD(NEXTVAL('patient_code_seq')::TEXT, 6, '0');
     END IF;

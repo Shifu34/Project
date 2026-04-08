@@ -21,5 +21,8 @@ exports.env = {
     hmsTemplateId: process.env.HMS_TEMPLATE_ID || '69ca5cc06cb1ece855eaf872',
     hmsAccessKey: process.env.HMS_ACCESS_KEY || '',
     hmsAppSecret: process.env.HMS_APP_SECRET || '',
+    // Payment timeout in ms. Default: 30 min (1_800_000).
+    // Set PAYMENT_TIMEOUT_MS=30000 for 30-second local testing.
+    paymentTimeoutMs: parseInt(process.env.PAYMENT_TIMEOUT_MS || String(30 * 60 * 1000), 10),
 };
 //# sourceMappingURL=env.js.map

@@ -17,8 +17,7 @@ router.get('/bills',        billingCtrl.getPayments);
 router.get('/bills/:id',    billingCtrl.getPaymentById);
 
 router.post('/payments',
-  authorize('admin', 'doctor'),
-  body('patient_id').isInt(),
+  authorize('admin', 'doctor', 'patient'),
   body('amount').isFloat({ min: 0.01 }),
   body('payment_method').isIn(['cash','credit_card','debit_card','insurance','bank_transfer','cheque','online']),
   validate,

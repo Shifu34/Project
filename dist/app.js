@@ -7,7 +7,6 @@ const express_1 = __importDefault(require("express"));
 const helmet_1 = __importDefault(require("helmet"));
 const cors_1 = __importDefault(require("cors"));
 const morgan_1 = __importDefault(require("morgan"));
-const env_1 = require("./config/env");
 const routes_1 = __importDefault(require("./routes"));
 const error_middleware_1 = require("./middleware/error.middleware");
 const logger_1 = __importDefault(require("./config/logger"));
@@ -16,15 +15,8 @@ const app = (0, express_1.default)();
 app.use((0, helmet_1.default)());
 // CORS
 app.use((0, cors_1.default)({
-    origin: (origin, callback) => {
-        if (!origin || env_1.env.allowedOrigins.includes(origin)) {
-            callback(null, true);
-        }
-        else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true,
+    origin: '*',
+    credentials: false,
 }));
 // Request logging
 app.use((0, morgan_1.default)('combined', {

@@ -5,8 +5,8 @@ import { AuthRequest } from '../middleware/auth.middleware';
 // GET /appointments
 export const getAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const page   = Math.max(1,   parseInt(req.params.page as string || '1',  10));
-    const size   = Math.min(100, parseInt(req.params.size as string || '20', 10));
+    const page   = Math.max(1,   parseInt(req.query.page as string || '1',  10));
+    const size   = Math.min(100, parseInt(req.query.size as string || '20', 10));
     const date   = req.query.date   as string | undefined;
     const status = req.query.status as string | undefined;
     const offset = (page - 1) * size;
@@ -525,7 +525,8 @@ export const getAppointmentEncounter = async (req: Request, res: Response, next:
                          u.first_name || ' ' || u.last_name) AS doctor_name,
                 JSON_AGG(
                   JSON_BUILD_OBJECT(
-                    'id', pi.id, 'medication_name', pi.medication_name,
+                    'id', pi.id, 'inventory_item_id', pi.inventory_item_id,
+                    'medication_name', pi.medication_name,
                     'dosage', pi.dosage, 'frequency', pi.frequency,
                     'duration', pi.duration, 'quantity', pi.quantity,
                     'route', pi.route, 'instructions', pi.instructions,
@@ -614,7 +615,7 @@ export const getAppointmentEncounter = async (req: Request, res: Response, next:
 //              heart_rate, respiratory_rate, oxygen_saturation,
 //              weight, height, bmi, blood_glucose, pain_scale, notes },
 //   diagnoses?: [{ icd_code, diagnosis_text, diagnosis_type, status, notes }],
-//   prescriptions?: [{ notes, valid_until, items: [{ medication_name, dosage,
+//   prescriptions?: [{ notes, valid_until, items: [{ inventory_item_id?, medication_name, dosage,
 //                       frequency, duration, quantity, route, instructions }] }],
 //   lab_orders?: [{ priority, clinical_notes, test_ids: number[] }],
 //   radiology_orders?: [{ priority, clinical_notes, test_ids: number[] }]
@@ -951,7 +952,7 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
         const iFields: string[] = [];
         const iVals: unknown[] = [];
         let ii = 1;
-        for (const key of ['medication_name','dosage','frequency','duration',
+        for (const key of ['inventory_item_id', 'medication_name','dosage','frequency','duration',
                             'quantity','route','instructions','is_dispensed']) {
           if (key in item) { iFields.push(`${key} = $${ii++}`); iVals.push(item[key]); }
         }
