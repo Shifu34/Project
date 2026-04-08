@@ -74,25 +74,35 @@ export const getPaymentById = async (req: Request, res: Response, next: NextFunc
 //   patient  — patient_id resolved from their own profile; received_by is NULL
 //   doctor   — patient_id must be passed in body; received_by set to doctor's user_id
 //   admin    — patient_id must be passed in body; received_by set to admin's user_id
+//
+// Body (all optional except amount):
+//   appointment_id, amount*, payment_method, transaction_reference,
+//   payment_status, paid_at, notes
 export const recordPayment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { appointment_id, amount, payment_method, transaction_reference, notes } = req.body;
+    const {
+      appointment_id,
+      amount,
+      payment_method,
+      transaction_reference,
+      payment_status,
+      paid_at,
+      notes,
+    } = req.body;
     const caller = req.user!;
 
     let patientId: number;
     let receivedBy: number | null;
 
     if (caller.roleName === 'patient') {
-      // Resolve patient from authenticated user
       const patRes = await query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [caller.userId]);
       if (patRes.rows.length === 0) {
         res.status(404).json({ success: false, message: 'Patient profile not found' });
         return;
       }
       patientId = patRes.rows[0].id;
-      receivedBy = null; // self-pay; no staff received
+      receivedBy = null;
     } else {
-      // Admin or doctor — patient_id must be supplied
       const bodyPatientId = parseInt(req.body.patient_id, 10);
       if (!bodyPatientId || isNaN(bodyPatientId)) {
         res.status(400).json({ success: false, message: 'patient_id is required' });
@@ -104,9 +114,20 @@ export const recordPayment = async (req: AuthRequest, res: Response, next: NextF
 
     const result = await query(
       `INSERT INTO payments
-         (appointment_id, patient_id, amount, payment_method, transaction_reference, received_by, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [appointment_id ?? null, patientId, amount, payment_method, transaction_reference ?? null, receivedBy, notes ?? null],
+         (appointment_id, patient_id, amount, payment_method, transaction_reference,
+          payment_status, paid_at, received_by, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [
+        appointment_id   ?? null,
+        patientId,
+        amount,
+        payment_method   ?? null,
+        transaction_reference ?? null,
+        payment_status   ?? 'completed',
+        paid_at          ?? null,
+        receivedBy,
+        notes            ?? null,
+      ],
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });

@@ -19,7 +19,9 @@ router.get('/bills/:id',    billingCtrl.getPaymentById);
 router.post('/payments',
   authorize('admin', 'doctor', 'patient'),
   body('amount').isFloat({ min: 0.01 }),
-  body('payment_method').isIn(['cash','credit_card','debit_card','insurance','bank_transfer','cheque','online']),
+  body('payment_method').optional().isIn(['cash','credit_card','debit_card','insurance','bank_transfer','cheque','online']),
+  body('payment_status').optional().isIn(['completed','pending','failed','refunded']),
+  body('paid_at').optional().isISO8601(),
   validate,
   billingCtrl.recordPayment,
 );
