@@ -14,14 +14,8 @@ app.use(helmet());
 
 // CORS
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || env.allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
+  origin: '*',
+  credentials: false,
 }));
 
 // Request logging
