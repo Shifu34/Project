@@ -19,4 +19,7 @@ export const env = {
   // Payment timeout in ms. Default: 30 min (1_800_000).
   // Set PAYMENT_TIMEOUT_MS=30000 for 30-second local testing.
   paymentTimeoutMs:   parseInt(process.env.PAYMENT_TIMEOUT_MS || String(30 * 60 * 1000), 10),
+  livekitApiKey:      process.env.LIVEKIT_API_KEY || '',
+  livekitApiSecret:   process.env.LIVEKIT_API_SECRET || '',
+  livekitUrl:         process.env.LIVEKIT_URL || '',
 };
