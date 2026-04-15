@@ -1,4 +1,5 @@
 import { query } from '../config/database';
+import { env } from '../config/env';
 import logger from '../config/logger';
 
 // How often to check (every 30 seconds)
@@ -18,14 +19,18 @@ export function startAppointmentStatusJob(): void {
 
   const run = async (): Promise<void> => {
     try {
+      const tz = env.appTimezone;
+
       // ── 1. Transition to in_progress ────────────────────────────────
+      // appointment_time is stored in local time; convert to UTC via AT TIME ZONE
+      // before comparing to NOW() (which is always UTC in the DB).
       const startedResult = await query(
         `UPDATE appointments
          SET    status = 'in_progress'
          WHERE  status IN ('scheduled', 'confirmed')
-           AND  (appointment_date + appointment_time)::TIMESTAMP <= NOW()
+           AND  (appointment_date + appointment_time) AT TIME ZONE $1 <= NOW()
          RETURNING id`,
-        [],
+        [tz],
       );
 
       if (startedResult.rows.length > 0) {
@@ -40,10 +45,10 @@ export function startAppointmentStatusJob(): void {
         `UPDATE appointments
          SET    status = 'pending'
          WHERE  status = 'in_progress'
-           AND  (appointment_date + appointment_time)::TIMESTAMP
+           AND  (appointment_date + appointment_time) AT TIME ZONE $1
                   + (duration_minutes || ' minutes')::INTERVAL <= NOW()
          RETURNING id`,
-        [],
+        [tz],
       );
 
       if (endedResult.rows.length > 0) {
