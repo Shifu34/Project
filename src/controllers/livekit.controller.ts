@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { AccessToken, RoomAgentDispatch, RoomConfiguration } from 'livekit-server-sdk';
+import { AccessToken, RoomAgentDispatch, RoomConfiguration, AgentDispatchClient } from 'livekit-server-sdk';
 import { env } from '../config/env';
 import { AuthRequest } from '../middleware/auth.middleware';
 
@@ -35,11 +35,21 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
       room: roomName,
     });
 
+    // Keep roomConfig as a fallback hint for LiveKit cloud
     token.roomConfig = new RoomConfiguration({
       agents: [new RoomAgentDispatch({ agentName })],
     });
 
     const jwt = await token.toJwt();
+
+    // Explicitly dispatch the agent server-side — this is the reliable path that
+    // ensures the agent joins regardless of room state or who connects first.
+    const dispatchClient = new AgentDispatchClient(
+      env.livekitUrl,
+      env.livekitApiKey,
+      env.livekitApiSecret,
+    );
+    await dispatchClient.createDispatch(roomName, agentName, { metadata: rawJwt });
 
     res.json({
       success: true,
