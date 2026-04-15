@@ -344,7 +344,7 @@ export const getUpcomingAppointment = async (req: AuthRequest, res: Response, ne
          AND (a.appointment_date > $3::date
               OR (a.appointment_date = $3::date AND a.appointment_time >= $4::time))
          AND a.appointment_date <= $3::date + ($2 || ' days')::INTERVAL
-         AND a.status NOT IN ('cancelled', 'no_show')
+         AND a.status NOT IN ('cancelled', 'no_show', 'completed', 'pending', 'in_progress')
        ORDER BY a.appointment_date ASC, a.appointment_time ASC
        LIMIT 1`,
       [ownerParam, days, currentDate, currentTime],
