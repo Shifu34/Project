@@ -11,11 +11,14 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
       return;
     }
 
-    const patientId = user.userId;
-    const rawJwt = req.headers.authorization!.split(' ')[1];
+    const userId   = user.userId;
+    const roleName = user.roleName;
+    const rawJwt   = req.headers.authorization!.split(' ')[1];
 
-    const roomName = `voice-${patientId}-${Math.floor(Date.now() / 1000)}`;
-    const identity = `patient-${patientId}`;
+    const isDoctor  = roleName === 'doctor';
+    const identity  = isDoctor ? `doctor-${userId}` : `patient-${userId}`;
+    const agentName = isDoctor ? 'murshid-doctor-agent' : 'murshid-hospital-agent';
+    const roomName  = `voice-${userId}-${Math.floor(Date.now() / 1000)}`;
 
     const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, {
       identity,
@@ -33,7 +36,7 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
     });
 
     token.roomConfig = new RoomConfiguration({
-      agents: [new RoomAgentDispatch({ agentName: 'murshid-hospital-agent' })],
+      agents: [new RoomAgentDispatch({ agentName })],
     });
 
     const jwt = await token.toJwt();
