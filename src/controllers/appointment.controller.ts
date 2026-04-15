@@ -1021,3 +1021,53 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
     client.release();
   }
 };
+
+// GET /appointments/range?start=YYYY-MM-DD&end=YYYY-MM-DD[&status=confirmed]
+export const getAppointmentsByDateRange = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { start, end, status } = req.query as { start?: string; end?: string; status?: string };
+
+    if (!start || !end) {
+      res.status(400).json({ success: false, message: 'start and end query params are required (YYYY-MM-DD)' });
+      return;
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(start) || !dateRegex.test(end)) {
+      res.status(400).json({ success: false, message: 'start and end must be in YYYY-MM-DD format' });
+      return;
+    }
+
+    if (start > end) {
+      res.status(400).json({ success: false, message: 'start date must not be after end date' });
+      return;
+    }
+
+    const params: unknown[] = [start, end];
+    let statusFilter = '';
+    if (status) {
+      params.push(status);
+      statusFilter = `AND a.status = $3`;
+    }
+
+    const result = await query(
+      `SELECT a.*,
+              CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code, p.phone AS patient_phone,
+              CONCAT(u.first_name,' ',u.last_name) AS doctor_name, doc.specialization,
+              dept.name AS department
+       FROM   appointments a
+       JOIN   patients p    ON p.id   = a.patient_id
+       JOIN   doctors doc   ON doc.id = a.doctor_id
+       JOIN   users u       ON u.id   = doc.user_id
+       LEFT JOIN departments dept ON dept.id = a.department_id
+       WHERE  a.appointment_date BETWEEN $1 AND $2
+       ${statusFilter}
+       ORDER BY a.appointment_date ASC, a.appointment_time ASC`,
+      params,
+    );
+
+    res.json({ success: true, data: result.rows, total: result.rows.length });
+  } catch (err) {
+    next(err);
+  }
+};

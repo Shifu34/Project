@@ -14,6 +14,7 @@ router.get('/me',               apptCtrl.getMyAppointments);
 router.get('/upcoming',         apptCtrl.getUpcomingAppointment);
 router.get('/categories',       apptCtrl.getAppointmentCategories);
 router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
+router.get('/range',            authorize('admin', 'doctor'), apptCtrl.getAppointmentsByDateRange);
 router.get('/:id',              apptCtrl.getAppointmentById);
 
 router.get('/:id/encounter',
