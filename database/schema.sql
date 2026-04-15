@@ -247,7 +247,7 @@ CREATE TABLE appointments (
                             CHECK (appointment_type IN ('In-clinic Visit','Online Consultation')),
     nature_of_visit_id   INT REFERENCES nature_of_visit(id) ON DELETE SET NULL,
     status              VARCHAR(20) DEFAULT 'scheduled'
-                            CHECK (status IN ('scheduled','confirmed','in_progress','completed','cancelled','no_show')),
+                            CHECK (status IN ('scheduled','confirmed','in_progress','pending','completed','cancelled','no_show')),
     reason              TEXT,
     notes               TEXT,
     booked_by           INT REFERENCES users(id) ON DELETE SET NULL,
