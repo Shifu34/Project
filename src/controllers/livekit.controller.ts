@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { AccessToken, RoomAgentDispatch, RoomConfiguration, AgentDispatchClient } from 'livekit-server-sdk';
+import { AccessToken, RoomAgentDispatch, RoomConfiguration, AgentDispatchClient, RoomServiceClient } from 'livekit-server-sdk';
 import { env } from '../config/env';
 import { AuthRequest } from '../middleware/auth.middleware';
 
@@ -20,6 +20,28 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
     const agentName = isDoctor ? 'murshid-doctor-agent' : 'murshid-hospital-agent';
     const roomName  = `voice-${userId}-${Math.floor(Date.now() / 1000)}`;
 
+    // Step 1: Pre-create the room so agent dispatch has a target room to join.
+    // Without this, createDispatch fails silently because the room doesn't exist yet.
+    const roomService = new RoomServiceClient(
+      env.livekitUrl,
+      env.livekitApiKey,
+      env.livekitApiSecret,
+    );
+    await roomService.createRoom({
+      name: roomName,
+      emptyTimeout: 300, // auto-delete after 5 min empty
+      maxParticipants: 10,
+    });
+
+    // Step 2: Explicitly dispatch the agent into the now-existing room.
+    const dispatchClient = new AgentDispatchClient(
+      env.livekitUrl,
+      env.livekitApiKey,
+      env.livekitApiSecret,
+    );
+    await dispatchClient.createDispatch(roomName, agentName, { metadata: rawJwt });
+
+    // Step 3: Build participant token for the Flutter client.
     const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, {
       identity,
       ttl: '1h',
@@ -35,21 +57,12 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
       room: roomName,
     });
 
-    // Keep roomConfig as a fallback hint for LiveKit cloud
+    // Keep as fallback hint
     token.roomConfig = new RoomConfiguration({
       agents: [new RoomAgentDispatch({ agentName })],
     });
 
     const jwt = await token.toJwt();
-
-    // Explicitly dispatch the agent server-side — this is the reliable path that
-    // ensures the agent joins regardless of room state or who connects first.
-    const dispatchClient = new AgentDispatchClient(
-      env.livekitUrl,
-      env.livekitApiKey,
-      env.livekitApiSecret,
-    );
-    await dispatchClient.createDispatch(roomName, agentName, { metadata: rawJwt });
 
     res.json({
       success: true,
