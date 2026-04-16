@@ -14,11 +14,16 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
     const userId   = user.userId;
     const roleName = user.roleName;
     const rawJwt   = req.headers.authorization!.split(' ')[1];
+    const intent   = (req.body?.intent as string) ?? null;
 
     const isDoctor  = roleName === 'doctor';
     const identity  = isDoctor ? `doctor-${userId}` : `patient-${userId}`;
     const agentName = isDoctor ? 'murshid-doctor-agent' : 'murshid-hospital-agent';
     const roomName  = `voice-${userId}-${Math.floor(Date.now() / 1000)}`;
+
+    // Metadata passed to both the participant token and agent dispatch.
+    // Agent code reads token (for auth) and intent (for sub-agent routing).
+    const metadata = JSON.stringify({ token: rawJwt, intent });
 
     // Step 1: Pre-create the room so agent dispatch has a target room to join.
     // Without this, createDispatch fails silently because the room doesn't exist yet.
@@ -39,7 +44,7 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
       env.livekitApiKey,
       env.livekitApiSecret,
     );
-    await dispatchClient.createDispatch(roomName, agentName, { metadata: rawJwt });
+    await dispatchClient.createDispatch(roomName, agentName, { metadata });
 
     // Step 3: Build participant token for the Flutter client.
     const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, {
@@ -47,7 +52,7 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
       ttl: '1h',
     });
 
-    token.metadata = rawJwt;
+    token.metadata = metadata;
 
     token.addGrant({
       roomJoin: true,
