@@ -27,6 +27,15 @@ router.post('/payments',
   billingCtrl.recordPayment,
 );
 
+// Demo payment endpoint
+router.post('/pay',
+  authorize('patient'),
+  body('appointment_id').isInt({ min: 1 }),
+  body('payment_method').isIn(['Card', 'Easypaisa', 'Jazzcash']),
+  validate,
+  billingCtrl.processPayment,
+);
+
 router.post('/refunds',
   authorize('admin'),
   body('payment_id').isInt(),

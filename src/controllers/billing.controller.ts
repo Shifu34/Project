@@ -220,3 +220,102 @@ export const getBillingSummary = async (_req: Request, res: Response, next: Next
 export const getBills     = getPayments;
 export const getBillById  = getPaymentById;
 export const createBill   = recordPayment;
+
+// POST /billing/pay  — demo payment endpoint
+// Body: appointment_id, payment_method (Card | Easypaisa | Jazzcash)
+export const processPayment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { appointment_id, payment_method } = req.body;
+
+    // Resolve patient from authenticated user
+    const patRes = await query(
+      `SELECT id FROM patients WHERE user_id = $1 LIMIT 1`,
+      [req.user!.userId],
+    );
+    if (patRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Patient profile not found' });
+      return;
+    }
+    const patientId = patRes.rows[0].id;
+
+    // Verify appointment exists and belongs to this patient
+    const apptRes = await query(
+      `SELECT id, status, patient_id FROM appointments WHERE id = $1 LIMIT 1`,
+      [appointment_id],
+    );
+    if (apptRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Appointment not found' });
+      return;
+    }
+    const appointment = apptRes.rows[0];
+    if (appointment.patient_id !== patientId) {
+      res.status(403).json({ success: false, message: 'Appointment does not belong to this patient' });
+      return;
+    }
+    if (appointment.status === 'confirmed') {
+      res.status(400).json({ success: false, message: 'Appointment is already confirmed' });
+      return;
+    }
+    if (appointment.status === 'cancelled') {
+      res.status(400).json({ success: false, message: 'Cannot pay for a cancelled appointment' });
+      return;
+    }
+
+    // Map demo payment methods to DB-compatible values
+    const methodMap: Record<string, string> = {
+      Card:      'credit_card',
+      Easypaisa: 'online',
+      Jazzcash:  'online',
+    };
+    const dbMethod = methodMap[payment_method] ?? 'online';
+
+    // Simulate demo payment processing (always succeeds)
+    const mockTransactionId = `DEMO-${payment_method.toUpperCase()}-${Date.now()}`;
+
+    // Record payment and update appointment status atomically
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const payResult = await client.query(
+        `INSERT INTO payments
+           (appointment_id, patient_id, amount, payment_method, transaction_reference,
+            payment_status, notes)
+         VALUES ($1, $2, 0, $3, $4, 'completed', $5) RETURNING *`,
+        [
+          appointment_id,
+          patientId,
+          dbMethod,
+          mockTransactionId,
+          `Demo payment via ${payment_method}`,
+        ],
+      );
+
+      await client.query(
+        `UPDATE appointments SET status = 'confirmed', updated_at = NOW() WHERE id = $1`,
+        [appointment_id],
+      );
+
+      await client.query('COMMIT');
+
+      res.status(200).json({
+        success: true,
+        message: 'Payment processed successfully',
+        data: {
+          payment: payResult.rows[0],
+          appointment_id,
+          appointment_status: 'confirmed',
+          transaction_id: mockTransactionId,
+          payment_method,
+        },
+      });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    next(err);
+  }
+};
