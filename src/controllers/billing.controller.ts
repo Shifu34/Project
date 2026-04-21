@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { query } from '../config/database';
+import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 // GET /billing/my-payments  — all payments for the authenticated patient
