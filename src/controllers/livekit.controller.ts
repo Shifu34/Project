@@ -13,8 +13,9 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
 
     const userId   = user.userId;
     const roleName = user.roleName;
-    const rawJwt   = req.headers.authorization!.split(' ')[1];
-    const intent   = (req.body?.intent as string) ?? null;
+    const rawJwt       = req.headers.authorization!.split(' ')[1];
+    const intent       = (req.body?.intent as string) ?? null;
+    const appointmentId = req.body?.appointment_id ? Number(req.body.appointment_id) : null;
 
     const isDoctor  = roleName === 'doctor';
     const identity  = isDoctor ? `doctor-${userId}` : `patient-${userId}`;
@@ -22,8 +23,9 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
     const roomName  = `voice-${userId}-${Math.floor(Date.now() / 1000)}`;
 
     // Metadata passed to both the participant token and agent dispatch.
-    // Agent code reads token (for auth) and intent (for sub-agent routing).
-    const metadata = JSON.stringify({ token: rawJwt, intent });
+    // Agent code reads token (for auth), intent (for sub-agent routing),
+    // and appointment_id (for doctor context).
+    const metadata = JSON.stringify({ token: rawJwt, intent, appointment_id: appointmentId });
 
     // Step 1: Pre-create the room so agent dispatch has a target room to join.
     // Without this, createDispatch fails silently because the room doesn't exist yet.
