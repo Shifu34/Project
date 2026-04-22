@@ -840,13 +840,25 @@ export const getPatientRadiologyOrders = async (req: Request, res: Response, nex
 };
 
 // ─── API 6 ──────────────────────────────────────────────────────────────────
-// GET /patients/:id/prescriptions?page=&limit=
+// GET /patients/:id/prescriptions?page=&limit=&status=
 export const getPatientPrescriptions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const patientId = req.params.id;
     const page   = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
+    const status = req.query.status as string | undefined;
     const offset = (page - 1) * limit;
+
+    const params: unknown[] = [limit, offset, patientId];
+    const countParams: unknown[] = [patientId];
+    let statusClause = '';
+    let countStatusClause = '';
+    if (status) {
+      statusClause      = `AND p.status = $${params.length + 1}`;
+      countStatusClause = `AND status = $${countParams.length + 1}`;
+      params.push(status);
+      countParams.push(status);
+    }
 
     const [dataRes, countRes] = await Promise.all([
       query(
@@ -870,13 +882,13 @@ export const getPatientPrescriptions = async (req: Request, res: Response, next:
          JOIN doctors d ON d.id = p.doctor_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
-         WHERE p.patient_id = $3
+         WHERE p.patient_id = $3 ${statusClause}
          GROUP BY p.id, u.first_name, u.last_name, d.specialization
          ORDER BY p.prescription_date DESC
          LIMIT $1 OFFSET $2`,
-        [limit, offset, patientId],
+        params,
       ),
-      query(`SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1`, [patientId]),
+      query(`SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1 ${countStatusClause}`, countParams),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
