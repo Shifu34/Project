@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/:id',             visitCtrl.getVisitById);
+router.get('/:id/full',        visitCtrl.getEncounterFull);
 router.get('/:id/diagnoses',   visitCtrl.getVisitDiagnoses);
 router.get('/:id/vitals',      visitCtrl.getEncounterVitals);
 

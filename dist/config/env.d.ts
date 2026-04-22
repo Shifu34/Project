@@ -14,5 +14,9 @@ export declare const env: {
     hmsAccessKey: string;
     hmsAppSecret: string;
     paymentTimeoutMs: number;
+    livekitApiKey: string;
+    livekitApiSecret: string;
+    livekitUrl: string;
+    appTimezone: string;
 };
 //# sourceMappingURL=env.d.ts.map

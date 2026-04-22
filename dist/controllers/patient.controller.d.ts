@@ -11,4 +11,8 @@ export declare const deletePatient: (req: Request, res: Response, next: NextFunc
 export declare const getPatientAppointments: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getPatientVisits: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getPatientMedicalHistory: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getPatientEncounters: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getPatientLabOrders: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getPatientRadiologyOrders: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getPatientPrescriptions: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 //# sourceMappingURL=patient.controller.d.ts.map

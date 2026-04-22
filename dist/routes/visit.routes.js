@@ -41,6 +41,7 @@ const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 router.get('/:id', visitCtrl.getVisitById);
+router.get('/:id/full', visitCtrl.getEncounterFull);
 router.get('/:id/diagnoses', visitCtrl.getVisitDiagnoses);
 router.get('/:id/vitals', visitCtrl.getEncounterVitals);
 router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), validate_middleware_1.validate, visitCtrl.createVisit);

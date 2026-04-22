@@ -16,6 +16,8 @@ const ward_routes_1 = __importDefault(require("./ward.routes"));
 const billing_routes_1 = __importDefault(require("./billing.routes"));
 const pharmacy_routes_1 = __importDefault(require("./pharmacy.routes"));
 const call_routes_1 = __importDefault(require("./call.routes"));
+const livekit_routes_1 = __importDefault(require("./livekit.routes"));
+const report_routes_1 = __importDefault(require("./report.routes"));
 const dashboard_controller_1 = require("../controllers/dashboard.controller");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = (0, express_1.Router)();
@@ -32,6 +34,8 @@ router.use('/ward', ward_routes_1.default);
 router.use('/billing', billing_routes_1.default);
 router.use('/pharmacy', pharmacy_routes_1.default);
 router.use('/calls', call_routes_1.default);
+router.use('/livekit', livekit_routes_1.default);
+router.use('/reports', report_routes_1.default);
 router.get('/dashboard', auth_middleware_1.authenticate, dashboard_controller_1.getDashboardStats);
 exports.default = router;
 //# sourceMappingURL=index.js.map

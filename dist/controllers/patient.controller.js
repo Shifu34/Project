@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPatientMedicalHistory = exports.getPatientVisits = exports.getPatientAppointments = exports.deletePatient = exports.updatePatient = exports.updateMyProfile = exports.createPatient = exports.getPatientByUserId = exports.getPatientById = exports.searchPatientsByParams = exports.getPatients = void 0;
+exports.getPatientPrescriptions = exports.getPatientRadiologyOrders = exports.getPatientLabOrders = exports.getPatientEncounters = exports.getPatientMedicalHistory = exports.getPatientVisits = exports.getPatientAppointments = exports.deletePatient = exports.updatePatient = exports.updateMyProfile = exports.createPatient = exports.getPatientByUserId = exports.getPatientById = exports.searchPatientsByParams = exports.getPatients = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 // GET /patients  – paginated list
@@ -511,4 +511,248 @@ const getPatientMedicalHistory = async (req, res, next) => {
     }
 };
 exports.getPatientMedicalHistory = getPatientMedicalHistory;
+// ─── API 1 ──────────────────────────────────────────────────────────────────
+// GET /patients/:id/encounters?page=&limit=
+// Paginated encounter list with patient header + insurance at the top
+const getPatientEncounters = async (req, res, next) => {
+    try {
+        const patientId = req.params.id;
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const offset = (page - 1) * limit;
+        const [patientRes, insuranceRes] = await Promise.all([
+            (0, database_1.query)(`SELECT p.id, p.patient_code, p.first_name, p.last_name,
+                p.gender, p.date_of_birth,
+                DATE_PART('year', AGE(p.date_of_birth))::INT AS age,
+                p.blood_type, p.phone, p.email, p.address,
+                p.emergency_contact_name, p.emergency_contact_phone,
+                p.marital_status, p.occupation, p.nationality, p.status
+         FROM patients p WHERE p.id = $1`, [patientId]),
+            (0, database_1.query)(`SELECT ui.*, ip.name AS provider_name, ip.contact_phone AS provider_phone
+         FROM user_insurances ui
+         JOIN insurance_providers ip ON ip.id = ui.insurance_provider_id
+         WHERE ui.patient_id = $1
+         ORDER BY ui.is_primary DESC, ui.valid_from DESC`, [patientId]),
+        ]);
+        if (patientRes.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'Patient not found' });
+            return;
+        }
+        const [encountersRes, countRes] = await Promise.all([
+            (0, database_1.query)(`SELECT e.*,
+                CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+                d.specialization AS doctor_specialization,
+                dept.name AS department_name
+         FROM encounters e
+         JOIN doctors d ON d.id = e.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN departments dept ON dept.id = (
+             SELECT department_id FROM appointments WHERE id = e.appointment_id LIMIT 1
+         )
+         WHERE e.patient_id = $1
+         ORDER BY e.encounter_date DESC
+         LIMIT $2 OFFSET $3`, [patientId, limit, offset]),
+            (0, database_1.query)(`SELECT COUNT(*) FROM encounters WHERE patient_id = $1`, [patientId]),
+        ]);
+        // Attach clinical notes to each encounter
+        const encounterIds = encountersRes.rows.map((e) => e.id);
+        const clinicalNotesMap = {};
+        if (encounterIds.length > 0) {
+            const notesRes = await (0, database_1.query)(`SELECT cn.*, CONCAT(u.first_name,' ',u.last_name) AS author_name
+         FROM clinical_notes cn
+         JOIN users u ON u.id = cn.doctor_id
+         WHERE cn.encounter_id = ANY($1::int[])
+         ORDER BY cn.created_at ASC`, [encounterIds]);
+            for (const note of notesRes.rows) {
+                if (!clinicalNotesMap[note.encounter_id])
+                    clinicalNotesMap[note.encounter_id] = [];
+                clinicalNotesMap[note.encounter_id].push(note);
+            }
+        }
+        const encounters = encountersRes.rows.map((e) => ({
+            ...e,
+            clinical_notes: clinicalNotesMap[e.id] ?? [],
+        }));
+        const total = parseInt(countRes.rows[0].count, 10);
+        res.json({
+            success: true,
+            data: {
+                patient: patientRes.rows[0],
+                insurance: insuranceRes.rows,
+                encounters,
+            },
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getPatientEncounters = getPatientEncounters;
+// ─── API 2 ──────────────────────────────────────────────────────────────────
+// GET /patients/:id/lab-orders?page=&limit=&status=
+const getPatientLabOrders = async (req, res, next) => {
+    try {
+        const patientId = req.params.id;
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const status = req.query.status;
+        const offset = (page - 1) * limit;
+        const params = [limit, offset, patientId];
+        const countParams = [patientId];
+        let statusClause = '';
+        let countStatusClause = '';
+        if (status) {
+            statusClause = `AND lo.status = $${params.length + 1}`;
+            countStatusClause = `AND lo.status = $${countParams.length + 1}`;
+            params.push(status);
+            countParams.push(status);
+        }
+        const [dataRes, countRes] = await Promise.all([
+            (0, database_1.query)(`SELECT lo.id, lo.encounter_id, lo.order_date, lo.priority, lo.status, lo.clinical_notes,
+                CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+                d.specialization AS doctor_specialization,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',             loi.id,
+                    'test_name',      ltc.name,
+                    'test_code',      ltc.code,
+                    'category',       ltc.category,
+                    'status',         loi.status,
+                    'result_value',   loi.result_value,
+                    'unit',           loi.unit,
+                    'normal_range',   loi.normal_range,
+                    'interpretation', loi.interpretation,
+                    'result_date',    loi.result_date
+                  ) ORDER BY loi.id
+                ) FILTER (WHERE loi.id IS NOT NULL) AS tests
+         FROM lab_orders lo
+         JOIN doctors d ON d.id = lo.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
+         LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
+         WHERE lo.patient_id = $3 ${statusClause}
+         GROUP BY lo.id, u.first_name, u.last_name, d.specialization
+         ORDER BY lo.order_date DESC
+         LIMIT $1 OFFSET $2`, params),
+            (0, database_1.query)(`SELECT COUNT(*) FROM lab_orders lo WHERE lo.patient_id = $1 ${countStatusClause}`, countParams),
+        ]);
+        const total = parseInt(countRes.rows[0].count, 10);
+        res.json({
+            success: true,
+            data: dataRes.rows,
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getPatientLabOrders = getPatientLabOrders;
+// ─── API 3 ──────────────────────────────────────────────────────────────────
+// GET /patients/:id/radiology-orders?page=&limit=&status=
+const getPatientRadiologyOrders = async (req, res, next) => {
+    try {
+        const patientId = req.params.id;
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const status = req.query.status;
+        const offset = (page - 1) * limit;
+        const params = [limit, offset, patientId];
+        const countParams = [patientId];
+        let statusClause = '';
+        let countStatusClause = '';
+        if (status) {
+            statusClause = `AND ro.status = $${params.length + 1}`;
+            countStatusClause = `AND ro.status = $${countParams.length + 1}`;
+            params.push(status);
+            countParams.push(status);
+        }
+        const [dataRes, countRes] = await Promise.all([
+            (0, database_1.query)(`SELECT ro.id, ro.encounter_id, ro.order_date, ro.priority, ro.status, ro.clinical_notes,
+                CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+                d.specialization AS doctor_specialization,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',             roi.id,
+                    'test_name',      rtc.name,
+                    'modality',       rtc.modality,
+                    'status',         roi.status,
+                    'findings',       roi.findings,
+                    'impression',     roi.impression,
+                    'recommendation', roi.recommendation,
+                    'image_url',      roi.image_url,
+                    'report_date',    roi.report_date
+                  ) ORDER BY roi.id
+                ) FILTER (WHERE roi.id IS NOT NULL) AS scans
+         FROM radiology_orders ro
+         JOIN doctors d ON d.id = ro.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
+         LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
+         WHERE ro.patient_id = $3 ${statusClause}
+         GROUP BY ro.id, u.first_name, u.last_name, d.specialization
+         ORDER BY ro.order_date DESC
+         LIMIT $1 OFFSET $2`, params),
+            (0, database_1.query)(`SELECT COUNT(*) FROM radiology_orders ro WHERE ro.patient_id = $1 ${countStatusClause}`, countParams),
+        ]);
+        const total = parseInt(countRes.rows[0].count, 10);
+        res.json({
+            success: true,
+            data: dataRes.rows,
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getPatientRadiologyOrders = getPatientRadiologyOrders;
+// ─── API 6 ──────────────────────────────────────────────────────────────────
+// GET /patients/:id/prescriptions?page=&limit=
+const getPatientPrescriptions = async (req, res, next) => {
+    try {
+        const patientId = req.params.id;
+        const page = Math.max(1, parseInt(req.query.page || '1', 10));
+        const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const offset = (page - 1) * limit;
+        const [dataRes, countRes] = await Promise.all([
+            (0, database_1.query)(`SELECT p.id, p.encounter_id, p.prescription_date, p.valid_until, p.status, p.notes,
+                CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+                d.specialization AS doctor_specialization,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',              pi.id,
+                    'medication_name', pi.medication_name,
+                    'dosage',          pi.dosage,
+                    'frequency',       pi.frequency,
+                    'duration',        pi.duration,
+                    'quantity',        pi.quantity,
+                    'route',           pi.route,
+                    'instructions',    pi.instructions,
+                    'is_dispensed',    pi.is_dispensed
+                  ) ORDER BY pi.id
+                ) FILTER (WHERE pi.id IS NOT NULL) AS items
+         FROM prescriptions p
+         JOIN doctors d ON d.id = p.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
+         WHERE p.patient_id = $3
+         GROUP BY p.id, u.first_name, u.last_name, d.specialization
+         ORDER BY p.prescription_date DESC
+         LIMIT $1 OFFSET $2`, [limit, offset, patientId]),
+            (0, database_1.query)(`SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1`, [patientId]),
+        ]);
+        const total = parseInt(countRes.rows[0].count, 10);
+        res.json({
+            success: true,
+            data: dataRes.rows,
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getPatientPrescriptions = getPatientPrescriptions;
 //# sourceMappingURL=patient.controller.js.map

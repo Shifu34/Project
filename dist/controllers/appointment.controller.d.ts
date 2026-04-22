@@ -14,4 +14,5 @@ export declare const getNatureOfVisits: (_req: Request, res: Response, next: Nex
 export declare const getAppointmentEncounter: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const saveAppointmentEncounter: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;
 export declare const updateAppointmentEncounter: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;
+export declare const getAppointmentsByDateRange: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 //# sourceMappingURL=appointment.controller.d.ts.map

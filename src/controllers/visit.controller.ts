@@ -178,3 +178,153 @@ export const getEncounterVitals = async (req: Request, res: Response, next: Next
     next(err);
   }
 };
+
+// ─── API 5 ──────────────────────────────────────────────────────────────────
+// GET /encounters/:id/full  – complete encounter with all related data
+export const getEncounterFull = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const encounterId = req.params.id;
+
+    const encounterRes = await query(
+      `SELECT e.*,
+              CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+              d.specialization AS doctor_specialization,
+              dept.name AS department_name
+       FROM encounters e
+       JOIN doctors d ON d.id = e.doctor_id
+       LEFT JOIN users u ON u.id = d.user_id
+       LEFT JOIN departments dept ON dept.id = (
+           SELECT department_id FROM appointments WHERE id = e.appointment_id LIMIT 1
+       )
+       WHERE e.id = $1`,
+      [encounterId],
+    );
+
+    if (encounterRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Encounter not found' });
+      return;
+    }
+
+    const [
+      clinicalNotesRes,
+      diagnosesRes,
+      vitalsRes,
+      prescriptionsRes,
+      labOrdersRes,
+      radiologyOrdersRes,
+    ] = await Promise.all([
+      query(
+        `SELECT cn.*, CONCAT(u.first_name,' ',u.last_name) AS author_name
+         FROM clinical_notes cn
+         JOIN users u ON u.id = cn.doctor_id
+         WHERE cn.encounter_id = $1
+         ORDER BY cn.created_at ASC`,
+        [encounterId],
+      ),
+      query(
+        `SELECT diag.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
+         FROM diagnoses diag
+         JOIN doctors d ON d.id = diag.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         WHERE diag.encounter_id = $1
+         ORDER BY diag.diagnosed_date ASC`,
+        [encounterId],
+      ),
+      query(
+        `SELECT v.*, CONCAT(u.first_name,' ',u.last_name) AS recorded_by_name
+         FROM vitals v
+         LEFT JOIN users u ON u.id = v.recorded_by
+         WHERE v.encounter_id = $1
+         ORDER BY v.recorded_at ASC`,
+        [encounterId],
+      ),
+      query(
+        `SELECT p.id, p.prescription_date, p.valid_until, p.status, p.notes,
+                CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',              pi.id,
+                    'medication_name', pi.medication_name,
+                    'dosage',          pi.dosage,
+                    'frequency',       pi.frequency,
+                    'duration',        pi.duration,
+                    'quantity',        pi.quantity,
+                    'route',           pi.route,
+                    'instructions',    pi.instructions,
+                    'is_dispensed',    pi.is_dispensed
+                  ) ORDER BY pi.id
+                ) FILTER (WHERE pi.id IS NOT NULL) AS items
+         FROM prescriptions p
+         JOIN doctors d ON d.id = p.doctor_id
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
+         WHERE p.encounter_id = $1
+         GROUP BY p.id, u.first_name, u.last_name`,
+        [encounterId],
+      ),
+      query(
+        `SELECT lo.id, lo.order_date, lo.priority, lo.status, lo.clinical_notes,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',             loi.id,
+                    'test_name',      ltc.name,
+                    'test_code',      ltc.code,
+                    'category',       ltc.category,
+                    'status',         loi.status,
+                    'result_value',   loi.result_value,
+                    'unit',           loi.unit,
+                    'normal_range',   loi.normal_range,
+                    'interpretation', loi.interpretation,
+                    'result_notes',   loi.result_notes,
+                    'result_date',    loi.result_date
+                  ) ORDER BY loi.id
+                ) FILTER (WHERE loi.id IS NOT NULL) AS tests
+         FROM lab_orders lo
+         LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
+         LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
+         WHERE lo.encounter_id = $1
+         GROUP BY lo.id`,
+        [encounterId],
+      ),
+      query(
+        `SELECT ro.id, ro.order_date, ro.priority, ro.status, ro.clinical_notes,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id',             roi.id,
+                    'test_name',      rtc.name,
+                    'modality',       rtc.modality,
+                    'status',         roi.status,
+                    'findings',       roi.findings,
+                    'impression',     roi.impression,
+                    'recommendation', roi.recommendation,
+                    'image_url',      roi.image_url,
+                    'report_date',    roi.report_date
+                  ) ORDER BY roi.id
+                ) FILTER (WHERE roi.id IS NOT NULL) AS scans
+         FROM radiology_orders ro
+         LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
+         LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
+         WHERE ro.encounter_id = $1
+         GROUP BY ro.id`,
+        [encounterId],
+      ),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        encounter: {
+          ...encounterRes.rows[0],
+          clinical_notes:   clinicalNotesRes.rows,
+          diagnoses:        diagnosesRes.rows,
+          vitals:           vitalsRes.rows,
+          prescriptions:    prescriptionsRes.rows,
+          lab_orders:       labOrdersRes.rows,
+          radiology_orders: radiologyOrdersRes.rows,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

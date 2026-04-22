@@ -41,12 +41,15 @@ const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 router.get('/summary', billingCtrl.getBillingSummary);
+router.get('/my-payments', (0, auth_middleware_1.authorize)('patient'), billingCtrl.getMyPayments);
 router.get('/payments', billingCtrl.getPayments);
 router.get('/payments/:id', billingCtrl.getPaymentById);
 // Backward-compat aliases
 router.get('/bills', billingCtrl.getPayments);
 router.get('/bills/:id', billingCtrl.getPaymentById);
-router.post('/payments', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), (0, express_validator_1.body)('amount').isFloat({ min: 0.01 }), (0, express_validator_1.body)('payment_method').isIn(['cash', 'credit_card', 'debit_card', 'insurance', 'bank_transfer', 'cheque', 'online']), validate_middleware_1.validate, billingCtrl.recordPayment);
+router.post('/payments', (0, auth_middleware_1.authorize)('patient'), (0, express_validator_1.body)('amount').isFloat({ min: 0.01 }), (0, express_validator_1.body)('payment_method').optional().isIn(['cash', 'credit_card', 'debit_card', 'insurance', 'bank_transfer', 'cheque', 'online']), (0, express_validator_1.body)('payment_status').optional().isIn(['completed', 'pending', 'failed', 'refunded']), (0, express_validator_1.body)('paid_at').optional().isISO8601(), validate_middleware_1.validate, billingCtrl.recordPayment);
+// Demo payment endpoint
+router.post('/pay', (0, auth_middleware_1.authorize)('patient'), (0, express_validator_1.body)('appointment_id').isInt({ min: 1 }), (0, express_validator_1.body)('payment_method').isIn(['Card', 'Easypaisa', 'Jazzcash']), validate_middleware_1.validate, billingCtrl.processPayment);
 router.post('/refunds', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('payment_id').isInt(), (0, express_validator_1.body)('amount').isFloat({ min: 0.01 }), validate_middleware_1.validate, billingCtrl.createRefund);
 exports.default = router;
 //# sourceMappingURL=billing.routes.js.map

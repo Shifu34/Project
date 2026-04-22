@@ -9,6 +9,7 @@ const database_1 = __importDefault(require("./config/database"));
 const logger_1 = __importDefault(require("./config/logger"));
 const appointmentPaymentTimeout_1 = require("./jobs/appointmentPaymentTimeout");
 const medicationExpiry_1 = require("./jobs/medicationExpiry");
+const appointmentStatus_1 = require("./jobs/appointmentStatus");
 const start = async () => {
     // Verify DB connection
     try {
@@ -23,6 +24,7 @@ const start = async () => {
     // Start background jobs
     (0, appointmentPaymentTimeout_1.startPaymentTimeoutJob)();
     (0, medicationExpiry_1.startMedicationExpiryJob)();
+    (0, appointmentStatus_1.startAppointmentStatusJob)();
     const server = app_1.default.listen(env_1.env.port, () => {
         logger_1.default.info(`Murshid Hospital API running on port ${env_1.env.port} [${env_1.env.nodeEnv}]`);
     });

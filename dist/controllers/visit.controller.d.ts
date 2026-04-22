@@ -7,4 +7,5 @@ export declare const addDiagnosis: (req: Request, res: Response, next: NextFunct
 export declare const getVisitDiagnoses: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const addClinicalNote: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getEncounterVitals: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getEncounterFull: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 //# sourceMappingURL=visit.controller.d.ts.map

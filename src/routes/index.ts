@@ -12,6 +12,7 @@ import billingRoutes      from './billing.routes';
 import pharmacyRoutes     from './pharmacy.routes';
 import callRoutes         from './call.routes';
 import livekitRoutes      from './livekit.routes';
+import reportRoutes        from './report.routes';
 import { getDashboardStats } from '../controllers/dashboard.controller';
 import { authenticate }   from '../middleware/auth.middleware';
 
@@ -31,6 +32,7 @@ router.use('/billing',       billingRoutes);
 router.use('/pharmacy',      pharmacyRoutes);
 router.use('/calls',         callRoutes);
 router.use('/livekit',       livekitRoutes);
+router.use('/reports',       reportRoutes);
 router.get('/dashboard',     authenticate, getDashboardStats);
 
 export default router;

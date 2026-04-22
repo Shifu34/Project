@@ -13,9 +13,13 @@ router.get('/me',     patientCtrl.getPatientByUserId);
 router.put('/me',     patientCtrl.updateMyProfile);
 router.get('/search', patientCtrl.searchPatientsByParams);
 router.get('/:id',    patientCtrl.getPatientById);
-router.get('/:id/appointments',    patientCtrl.getPatientAppointments);
-router.get('/:id/visits',          patientCtrl.getPatientVisits);
-router.get('/:id/medical-history', patientCtrl.getPatientMedicalHistory);
+router.get('/:id/appointments',      patientCtrl.getPatientAppointments);
+router.get('/:id/visits',            patientCtrl.getPatientVisits);
+router.get('/:id/medical-history',   patientCtrl.getPatientMedicalHistory);
+router.get('/:id/encounters',        patientCtrl.getPatientEncounters);
+router.get('/:id/lab-orders',        patientCtrl.getPatientLabOrders);
+router.get('/:id/radiology-orders',  patientCtrl.getPatientRadiologyOrders);
+router.get('/:id/prescriptions',     patientCtrl.getPatientPrescriptions);
 
 router.post('/',
   authorize('admin', 'doctor'),
