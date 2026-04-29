@@ -39,6 +39,37 @@ function hmsRequest<T>(method: string, path: string, body?: unknown): Promise<T>
   });
 }
 
+// ── helper: generic JSON POST to an external HTTPS endpoint ────
+function httpPost(hostname: string, path: string, body: unknown): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = https.request(
+      {
+        hostname,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        res.resume(); // drain response
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve();
+          } else {
+            reject(new Error(`POST ${hostname}${path} returned ${res.statusCode}`));
+          }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
 // ── POST /calls/room  — create room + get codes ───────────────
 export const createCallRoom = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -50,8 +81,12 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
 
     // 1. Fetch appointment ------------------------------------------------
     const apptResult = await query(
-      `SELECT a.id, a.patient_id, a.doctor_id, a.appointment_type, a.reason
+      `SELECT a.id, a.patient_id, a.doctor_id, a.appointment_type, a.reason,
+              p.first_name || ' ' || p.last_name AS patient_name,
+              d.first_name || ' ' || d.last_name AS doctor_name
        FROM appointments a
+       JOIN patients p ON p.id = a.patient_id
+       JOIN doctors  d ON d.id = a.doctor_id
        WHERE a.id = $1`,
       [appointment_id],
     );
@@ -106,6 +141,18 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
        RETURNING *`,
       [appointment_id, appt.patient_id, appt.doctor_id, roomId, patientRoomCode, doctorRoomCode],
     );
+
+    // 5. Notify FDA agent -------------------------------------------------
+    httpPost('mh-fda-agent-production-3e20.up.railway.app', '/register-room', {
+      room_id: roomId,
+      appointment_id,
+      patient_id: appt.patient_id,
+      doctor_id: appt.doctor_id,
+      doctor_name: `Dr. ${appt.doctor_name}`,
+      patient_name: appt.patient_name,
+    }).catch((err: unknown) => {
+      console.error('[register-room] notification failed:', err);
+    });
 
     res.status(201).json({ success: true, data: insertResult.rows[0] });
   } catch (err) {
