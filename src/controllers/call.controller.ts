@@ -142,17 +142,21 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
       [appointment_id, appt.patient_id, appt.doctor_id, roomId, patientRoomCode, doctorRoomCode],
     );
 
-    // 5. Notify FDA agent -------------------------------------------------
-    httpPost('mh-fda-agent-production-3e20.up.railway.app', '/register-room', {
-      room_id: roomId,
-      appointment_id,
-      patient_id: appt.patient_id,
-      doctor_id: appt.doctor_id,
-      doctor_name: `Dr. ${appt.doctor_name}`,
-      patient_name: appt.patient_name,
-    }).catch((err: unknown) => {
-      console.error('[register-room] notification failed:', err);
-    });
+    // 5. Notify FDA agent — awaited so registration completes BEFORE
+    //    room codes are returned to Flutter (Flutter must not connect first)
+    try {
+      await httpPost('mh-fda-agent-production-3e20.up.railway.app', '/register-room', {
+        room_id: roomId,
+        appointment_id,
+        patient_id: appt.patient_id,
+        doctor_id: appt.doctor_id,
+        doctor_name: `Dr. ${appt.doctor_name}`,
+        patient_name: appt.patient_name,
+      });
+    } catch (fdaErr: unknown) {
+      // Log but do not block the response — room was already created in 100ms + DB
+      console.error('[register-room] notification failed:', fdaErr);
+    }
 
     res.status(201).json({ success: true, data: insertResult.rows[0] });
   } catch (err) {
