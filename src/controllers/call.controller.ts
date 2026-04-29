@@ -73,6 +73,10 @@ function httpPost(hostname: string, path: string, body: unknown): Promise<void> 
 // ── POST /calls/room  — create room + get codes ───────────────
 export const createCallRoom = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    if (!env.hmsManagementToken) {
+      res.status(503).json({ success: false, message: 'HMS_MANAGEMENT_TOKEN is not configured on the server' });
+      return;
+    }
     const { appointment_id } = req.body;
     if (!appointment_id) {
       res.status(400).json({ success: false, message: 'appointment_id is required' });
@@ -159,7 +163,10 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
     }
 
     res.status(201).json({ success: true, data: insertResult.rows[0] });
-  } catch (err) {
+  } catch (err: unknown) {
+    // Surface the real error message so it appears in Railway logs and debug responses
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[createCallRoom] error:', message);
     next(err);
   }
 };
