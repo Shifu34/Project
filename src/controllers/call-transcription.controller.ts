@@ -4,13 +4,14 @@ import { AuthRequest } from '../middleware/auth.middleware';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /call-transcriptions
-// Body: { appointment_id?, room_name?, transcription, language?,
+// Body: { appointment_id?, room_id?, room_name?, transcription, language?,
 //         duration_seconds?, started_at?, ended_at? }
 // ─────────────────────────────────────────────────────────────────────────────
 export const createCallTranscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const {
       appointment_id   = null,
+      room_id          = null,
       room_name        = null,
       transcription,
       language         = 'en',
@@ -21,12 +22,12 @@ export const createCallTranscription = async (req: AuthRequest, res: Response, n
 
     const result = await query(
       `INSERT INTO call_transcriptions
-         (appointment_id, room_name, transcription, language,
+         (appointment_id, room_id, room_name, transcription, language,
           duration_seconds, started_at, ended_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
       [
-        appointment_id, room_name, transcription, language,
+        appointment_id, room_id, room_name, transcription, language,
         duration_seconds, started_at, ended_at, req.user?.userId ?? null,
       ],
     );
@@ -84,6 +85,7 @@ export const getCallTranscriptions = async (req: AuthRequest, res: Response, nex
 
     const qs = req.query as Record<string, string>;
     if (qs.appointment_id) filters.push({ col: 'ct.appointment_id', val: qs.appointment_id });
+    if (qs.room_id)        filters.push({ col: 'ct.room_id',        val: qs.room_id });
     if (qs.room_name)      filters.push({ col: 'ct.room_name',      val: qs.room_name });
 
     const where = filters.length

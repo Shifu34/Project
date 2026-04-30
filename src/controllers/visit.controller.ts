@@ -328,3 +328,112 @@ export const getEncounterFull = async (req: Request, res: Response, next: NextFu
     next(err);
   }
 };
+
+// ─── Smart Encounter ─────────────────────────────────────────────────────────
+// GET /encounters/:id/smart?fields=chief_complaint,diagnosis,bp,...
+//
+// Extracts requested field values from three sources (in priority order):
+//   1. call_ai_notes.structured_data   (real-time AI notes, doctor-only)
+//   2. ai_summaries.structured_data    (post-call summary, summary_type='call')
+//   3. clinical_notes.content          (raw text from doctor, returned as-is)
+//
+// Response per field: { value: string, source: 'ai_notes'|'call_summary'|null }
+// Also returns raw text from call summary + doctor notes for full context.
+// ─────────────────────────────────────────────────────────────────────────────
+export const getEncounterSmart = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const encounterId = req.params.id;
+    const fieldsParam = (req.query.fields as string | undefined) || '';
+    const requestedFields = fieldsParam
+      .split(',')
+      .map(f => f.trim())
+      .filter(Boolean);
+
+    // 1. Resolve appointment_id from encounter
+    const encRes = await query(
+      `SELECT id, appointment_id, patient_id, doctor_id FROM encounters WHERE id = $1`,
+      [encounterId],
+    );
+    if (encRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Encounter not found' });
+      return;
+    }
+    const enc = encRes.rows[0];
+    const appointmentId = enc.appointment_id;
+
+    // 2. Fetch all sources in parallel
+    const [aiNotesRes, callSummaryRes, doctorNotesRes] = await Promise.all([
+      // AI notes for this appointment (latest final note first, then interim, then realtime)
+      query(
+        `SELECT structured_data, content, note_type, created_at
+         FROM call_ai_notes
+         WHERE appointment_id = $1
+         ORDER BY
+           CASE note_type WHEN 'final' THEN 1 WHEN 'interim' THEN 2 ELSE 3 END,
+           created_at DESC`,
+        [appointmentId],
+      ),
+      // Post-call summary
+      query(
+        `SELECT structured_data, content, created_at
+         FROM ai_summaries
+         WHERE appointment_id = $1 AND summary_type = 'call'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [appointmentId],
+      ),
+      // Doctor clinical notes
+      query(
+        `SELECT content, note_type, created_at
+         FROM clinical_notes
+         WHERE encounter_id = $1
+         ORDER BY created_at DESC`,
+        [encounterId],
+      ),
+    ]);
+
+    // 3. Build merged structured_data from AI notes (priority: final > interim > realtime)
+    const aiStructured: Record<string, string> = {};
+    for (const row of [...aiNotesRes.rows].reverse()) {
+      if (row.structured_data && typeof row.structured_data === 'object') {
+        Object.assign(aiStructured, row.structured_data);
+      }
+    }
+
+    const summaryStructured: Record<string, string> =
+      callSummaryRes.rows[0]?.structured_data ?? {};
+
+    // 4. Extract requested fields
+    const fields: Record<string, { value: string; source: string | null }> = {};
+    for (const field of requestedFields) {
+      const fromAiNotes    = aiStructured[field]    ?? aiStructured[field.toLowerCase()];
+      const fromSummary    = summaryStructured[field] ?? summaryStructured[field.toLowerCase()];
+
+      if (fromAiNotes !== undefined && fromAiNotes !== null && String(fromAiNotes).trim() !== '') {
+        fields[field] = { value: String(fromAiNotes), source: 'ai_notes' };
+      } else if (fromSummary !== undefined && fromSummary !== null && String(fromSummary).trim() !== '') {
+        fields[field] = { value: String(fromSummary), source: 'call_summary' };
+      } else {
+        fields[field] = { value: '', source: null };
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        encounter_id:    enc.id,
+        appointment_id:  enc.appointment_id,
+        patient_id:      enc.patient_id,
+        doctor_id:       enc.doctor_id,
+        fields,
+        // Raw context for the caller to use if needed
+        call_summary_raw:   callSummaryRes.rows[0]?.content ?? null,
+        doctor_notes_raw:   doctorNotesRes.rows.map(r => r.content).join('\n\n') || null,
+        ai_notes_raw:       aiNotesRes.rows.map(r => r.content).filter(Boolean).join('\n\n') || null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+

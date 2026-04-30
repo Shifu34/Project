@@ -23,23 +23,105 @@ export const createAiSummary = async (req: AuthRequest, res: Response, next: Nex
       doctor_id           = null,
       ai_model            = null,
       language            = 'en',
+      structured_data     = null,
     } = req.body;
 
     const result = await query(
       `INSERT INTO ai_summaries
-         (summary_type, content, patient_id, appointment_id, encounter_id,
+         (summary_type, content, structured_data, patient_id, appointment_id, encounter_id,
           report_id, lab_order_id, radiology_order_id, prescription_id,
           doctor_id, ai_model, language, generated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`,
       [
-        summary_type, content, patient_id, appointment_id, encounter_id,
+        summary_type, content,
+        structured_data ? JSON.stringify(structured_data) : null,
+        patient_id, appointment_id, encounter_id,
         report_id, lab_order_id, radiology_order_id, prescription_id,
         doctor_id, ai_model, language, req.user?.userId ?? null,
       ],
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /ai-summaries/call-summary
+// Convenience wrapper: saves a post-call summary (summary_type='call') visible
+// to both doctor and patient. Links to appointment (and optionally encounter).
+// Body: { appointment_id, patient_id, doctor_id?, content, structured_data?,
+//         encounter_id?, ai_model?, language? }
+// ─────────────────────────────────────────────────────────────────────────────
+export const createCallSummary = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const {
+      appointment_id,
+      patient_id,
+      doctor_id       = null,
+      encounter_id    = null,
+      content,
+      structured_data = null,
+      ai_model        = null,
+      language        = 'en',
+    } = req.body;
+
+    if (!appointment_id || !patient_id || !content) {
+      res.status(400).json({ success: false, message: 'appointment_id, patient_id and content are required' });
+      return;
+    }
+
+    const result = await query(
+      `INSERT INTO ai_summaries
+         (summary_type, content, structured_data, patient_id, appointment_id,
+          encounter_id, doctor_id, ai_model, language, generated_by)
+       VALUES ('call',$1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING *`,
+      [
+        content,
+        structured_data ? JSON.stringify(structured_data) : null,
+        patient_id, appointment_id, encounter_id, doctor_id,
+        ai_model, language, req.user?.userId ?? null,
+      ],
+    );
+
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /ai-summaries/call-summary?appointment_id=
+// Returns the post-call summary for an appointment (visible to doctor + patient)
+// ─────────────────────────────────────────────────────────────────────────────
+export const getCallSummary = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { appointment_id } = req.query;
+
+    if (!appointment_id) {
+      res.status(400).json({ success: false, message: 'appointment_id query param is required' });
+      return;
+    }
+
+    const result = await query(
+      `SELECT s.*,
+              CONCAT(u.first_name,' ',u.last_name) AS generated_by_name,
+              p.first_name || ' ' || p.last_name   AS patient_name,
+              d.first_name || ' ' || d.last_name   AS doctor_name
+       FROM ai_summaries s
+       LEFT JOIN users    u ON u.id = s.generated_by
+       LEFT JOIN patients p ON p.id = s.patient_id
+       LEFT JOIN doctors  d ON d.id = s.doctor_id
+       WHERE s.appointment_id = $1
+         AND s.summary_type   = 'call'
+       ORDER BY s.created_at DESC`,
+      [appointment_id],
+    );
+
+    res.json({ success: true, data: result.rows });
   } catch (err) {
     next(err);
   }
