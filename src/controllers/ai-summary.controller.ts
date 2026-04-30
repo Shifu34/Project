@@ -164,40 +164,43 @@ export const getAiSummaries = async (req: AuthRequest, res: Response, next: Next
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const offset = (page - 1) * limit;
 
-    const filters: { col: string; val: unknown }[] = [];
+    const filterVals: unknown[] = [];
+    const conditions: string[] = [];
 
     const qs = req.query as Record<string, string>;
     for (const col of ['patient_id', 'summary_type', 'appointment_id', 'encounter_id', 'report_id', 'lab_order_id', 'radiology_order_id', 'prescription_id']) {
-      if (qs[col]) filters.push({ col: `s.${col}`, val: qs[col] });
+      if (qs[col]) {
+        filterVals.push(qs[col]);
+        conditions.push(`s.${col} = $${filterVals.length}`);
+      }
     }
 
-    const where = filters.length
-      ? 'WHERE ' + filters.map((f, i) => `${f.col} = $${i + 3}`).join(' AND ')
-      : '';
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const params = [limit, offset, ...filters.map(f => f.val)];
-    const countParams = filters.map(f => f.val);
+    // Count query uses $1..$n for filter values
+    const countRes = await query(
+      `SELECT COUNT(*) FROM ai_summaries s ${where}`,
+      filterVals,
+    );
 
-    const [dataRes, countRes] = await Promise.all([
-      query(
-        `SELECT s.id, s.summary_type, s.patient_id, s.appointment_id,
-                s.encounter_id, s.report_id, s.lab_order_id,
-                s.radiology_order_id, s.prescription_id, s.doctor_id,
-                s.ai_model, s.language, s.created_at,
-                LEFT(s.content, 200) AS content_preview,
-                CONCAT(u.first_name,' ',u.last_name) AS generated_by_name
-         FROM ai_summaries s
-         LEFT JOIN users u ON u.id = s.generated_by
-         ${where}
-         ORDER BY s.created_at DESC
-         LIMIT $1 OFFSET $2`,
-        params,
-      ),
-      query(
-        `SELECT COUNT(*) FROM ai_summaries s ${where}`,
-        countParams,
-      ),
-    ]);
+    // Data query appends limit/offset AFTER filter values
+    const limitIdx  = filterVals.length + 1;
+    const offsetIdx = filterVals.length + 2;
+
+    const dataRes = await query(
+      `SELECT s.id, s.summary_type, s.patient_id, s.appointment_id,
+              s.encounter_id, s.report_id, s.lab_order_id,
+              s.radiology_order_id, s.prescription_id, s.doctor_id,
+              s.ai_model, s.language, s.created_at, s.structured_data,
+              s.content,
+              CONCAT(u.first_name,' ',u.last_name) AS generated_by_name
+       FROM ai_summaries s
+       LEFT JOIN users u ON u.id = s.generated_by
+       ${where}
+       ORDER BY s.created_at DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      [...filterVals, limit, offset],
+    );
 
     const total = parseInt(countRes.rows[0].count, 10);
     res.json({
