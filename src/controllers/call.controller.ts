@@ -87,10 +87,15 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
     const apptResult = await query(
       `SELECT a.id, a.patient_id, a.doctor_id, a.appointment_type, a.reason,
               p.first_name || ' ' || p.last_name AS patient_name,
-              d.first_name || ' ' || d.last_name AS doctor_name
+              d.first_name || ' ' || d.last_name AS doctor_name,
+              d.user_id AS doctor_user_id,
+              u.role_id AS doctor_role_id,
+              u.role_name AS doctor_role_name,
+              u.email AS doctor_email
        FROM appointments a
        JOIN patients p ON p.id = a.patient_id
        JOIN doctors  d ON d.id = a.doctor_id
+       LEFT JOIN users u ON u.id = d.user_id
        WHERE a.id = $1`,
       [appointment_id],
     );
@@ -149,13 +154,24 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
     // 5. Notify FDA agent — awaited so registration completes BEFORE
     //    room codes are returned to Flutter (Flutter must not connect first)
     try {
+      // Generate a fresh JWT for the doctor so the FDA agent can authenticate
+      // back to the hospital backend on behalf of the doctor
+      const doctorPayload = {
+        userId:   appt.doctor_user_id,
+        roleId:   appt.doctor_role_id,
+        roleName: appt.doctor_role_name ?? 'doctor',
+        email:    appt.doctor_email,
+      };
+      const doctorToken = jwt.sign(doctorPayload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
+
       await httpPost('mh-fda-agent-production-3e20.up.railway.app', '/register-room', {
-        room_id: roomId,
+        room_id:      roomId,
         appointment_id,
-        patient_id: appt.patient_id,
-        doctor_id: appt.doctor_id,
-        doctor_name: `Dr. ${appt.doctor_name}`,
+        patient_id:   appt.patient_id,
+        doctor_id:    appt.doctor_id,
+        doctor_name:  `Dr. ${appt.doctor_name}`,
         patient_name: appt.patient_name,
+        doctor_token: doctorToken,
       });
     } catch (fdaErr: unknown) {
       // Log but do not block the response — room was already created in 100ms + DB
