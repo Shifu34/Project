@@ -904,22 +904,36 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
       }
     }
 
-    // Update diagnoses by id
+    // Upsert diagnoses: no id → INSERT new, id present → UPDATE existing
     if (Array.isArray(diagnoses)) {
       for (const d of diagnoses) {
-        if (!d.id) continue;
-        const dFields: string[] = [];
-        const dVals: unknown[] = [];
-        let di = 1;
-        for (const key of ['icd_code','diagnosis_text','diagnosis_type','status','notes']) {
-          if (key in d) { dFields.push(`${key} = $${di++}`); dVals.push(d[key]); }
-        }
-        if (dFields.length) {
-          dVals.push(d.id);
+        if (!d.id) {
+          // New diagnosis — insert it
           await client.query(
-            `UPDATE diagnoses SET ${dFields.join(', ')} WHERE id = $${di} AND encounter_id = $${di + 1}`,
-            [...dVals, encounterId],
+            `INSERT INTO diagnoses
+               (encounter_id, patient_id, doctor_id, icd_code, diagnosis_text,
+                diagnosis_type, status, notes)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [encounterId, patient_id, doctor_id,
+             d.icd_code ?? null, d.diagnosis_text,
+             d.diagnosis_type ?? 'primary', d.status ?? 'active',
+             d.notes ?? null],
           );
+        } else {
+          // Existing diagnosis — update it
+          const dFields: string[] = [];
+          const dVals: unknown[] = [];
+          let di = 1;
+          for (const key of ['icd_code','diagnosis_text','diagnosis_type','status','notes']) {
+            if (key in d) { dFields.push(`${key} = $${di++}`); dVals.push(d[key]); }
+          }
+          if (dFields.length) {
+            dVals.push(d.id);
+            await client.query(
+              `UPDATE diagnoses SET ${dFields.join(', ')} WHERE id = $${di} AND encounter_id = $${di + 1}`,
+              [...dVals, encounterId],
+            );
+          }
         }
       }
     }
