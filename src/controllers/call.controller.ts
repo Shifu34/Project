@@ -90,12 +90,13 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
               d.first_name || ' ' || d.last_name AS doctor_name,
               d.user_id AS doctor_user_id,
               u.role_id AS doctor_role_id,
-              u.role_name AS doctor_role_name,
+              r.name AS doctor_role_name,
               u.email AS doctor_email
        FROM appointments a
        JOIN patients p ON p.id = a.patient_id
        JOIN doctors  d ON d.id = a.doctor_id
        LEFT JOIN users u ON u.id = d.user_id
+       LEFT JOIN roles r ON r.id = u.role_id
        WHERE a.id = $1`,
       [appointment_id],
     );
