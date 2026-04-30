@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import * as apptCtrl from '../controllers/appointment.controller';
+import { getAppointmentSmart } from '../controllers/visit.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 
@@ -16,6 +17,9 @@ router.get('/categories',       apptCtrl.getAppointmentCategories);
 router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
 router.get('/range',            authorize('admin', 'doctor'), apptCtrl.getAppointmentsByDateRange);
 router.get('/:id',              apptCtrl.getAppointmentById);
+
+// Smart field extraction — works before encounter is created
+router.get('/:id/smart',        getAppointmentSmart);
 
 router.get('/:id/encounter',
   apptCtrl.getAppointmentEncounter,
