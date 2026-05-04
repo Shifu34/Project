@@ -5,6 +5,7 @@ import logger from './config/logger';
 import { startPaymentTimeoutJob } from './jobs/appointmentPaymentTimeout';
 import { startMedicationExpiryJob } from './jobs/medicationExpiry';
 import { startAppointmentStatusJob } from './jobs/appointmentStatus';
+import { startReportSummarizeJob } from './jobs/reportSummarize';
 
 const start = async () => {
   // Verify DB connection
@@ -21,6 +22,7 @@ const start = async () => {
   startPaymentTimeoutJob();
   startMedicationExpiryJob();
   startAppointmentStatusJob();
+  startReportSummarizeJob();
 
   const server = app.listen(env.port, () => {
     logger.info(`Murshid Hospital API running on port ${env.port} [${env.nodeEnv}]`);
