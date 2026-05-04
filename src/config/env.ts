@@ -23,4 +23,5 @@ export const env = {
   livekitApiSecret:   process.env.LIVEKIT_API_SECRET || '',
   livekitUrl:         process.env.LIVEKIT_URL || '',
   appTimezone:        process.env.APP_TIMEZONE || 'Asia/Karachi',
+  deepseekApiKey:     process.env.DEEPSEEK_API_KEY || '',
 };

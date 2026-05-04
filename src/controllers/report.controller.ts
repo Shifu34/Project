@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
+import https from 'https';
 import { query } from '../config/database';
+import { env } from '../config/env';
 
 // ─── API 4 ──────────────────────────────────────────────────────────────────
 // GET /reports/:id  – full report details including attached files
@@ -151,6 +153,173 @@ export const getReports = async (req: Request, res: Response, next: NextFunction
       success: true,
       data: dataRes.rows,
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// POST /reports/:id/summarize
+// Calls DeepSeek to generate a patient-friendly summary and saves it to
+// medical_reports.summary. Returns the updated summary.
+// ---------------------------------------------------------------------------
+
+function deepseekChat(prompt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!env.deepseekApiKey) {
+      reject(new Error('DEEPSEEK_API_KEY is not configured'));
+      return;
+    }
+
+    const body = JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a medical assistant that writes clear, compassionate, patient-friendly summaries of medical reports. ' +
+            'Avoid jargon. Use simple language a non-medical person can understand. ' +
+            'Be concise (3-5 sentences). Do not make diagnoses or give advice beyond what the report states.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: 400,
+    });
+
+    const options = {
+      hostname: 'api.deepseek.com',
+      path: '/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.deepseekApiKey}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data) as {
+            choices?: { message?: { content?: string } }[];
+            error?: { message?: string };
+          };
+          if (parsed.error) { reject(new Error(parsed.error.message || 'DeepSeek error')); return; }
+          const content = parsed.choices?.[0]?.message?.content?.trim();
+          if (!content) { reject(new Error('Empty response from DeepSeek')); return; }
+          resolve(content);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+export const summarizeReport = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const reportId = parseInt(req.params.id, 10);
+
+    // Fetch full report + related data (same joins as getReportById)
+    const reportRes = await query(
+      `SELECT mr.*,
+              p.first_name       AS patient_first_name,
+              p.last_name        AS patient_last_name,
+              DATE_PART('year', AGE(p.date_of_birth))::INT AS patient_age,
+              p.gender           AS patient_gender,
+              CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
+              d.specialization   AS doctor_specialization,
+              e.chief_complaint,
+              e.assessment,
+              e.plan
+       FROM medical_reports mr
+       JOIN patients p ON p.id = mr.patient_id
+       LEFT JOIN doctors d ON d.id = mr.doctor_id
+       LEFT JOIN users u ON u.id = d.user_id
+       LEFT JOIN encounters e ON e.id = mr.encounter_id
+       WHERE mr.id = $1`,
+      [reportId],
+    );
+
+    if (reportRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Report not found' });
+      return;
+    }
+
+    const r = reportRes.rows[0];
+
+    // Gather lab results if linked
+    let labLines = '';
+    if (r.lab_order_id) {
+      const labRes = await query(
+        `SELECT ltc.name, loi.result_value, loi.unit, loi.normal_range, loi.interpretation
+         FROM lab_order_items loi
+         JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
+         WHERE loi.lab_order_id = $1 AND loi.result_value IS NOT NULL`,
+        [r.lab_order_id],
+      );
+      labLines = labRes.rows
+        .map((row) => `  - ${row.name}: ${row.result_value} ${row.unit || ''} (normal: ${row.normal_range || 'N/A'}, interpretation: ${row.interpretation || 'N/A'})`)
+        .join('\n');
+    }
+
+    // Gather radiology results if linked
+    let radioLines = '';
+    if (r.radiology_order_id) {
+      const radioRes = await query(
+        `SELECT rtc.name, roi.findings, roi.impression
+         FROM radiology_order_items roi
+         JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
+         WHERE roi.radiology_order_id = $1`,
+        [r.radiology_order_id],
+      );
+      radioLines = radioRes.rows
+        .map((row) => `  - ${row.name}: Findings: ${row.findings || 'N/A'} | Impression: ${row.impression || 'N/A'}`)
+        .join('\n');
+    }
+
+    // Build the prompt
+    const lines: string[] = [
+      `Report title: ${r.title}`,
+      `Report type: ${r.report_type}`,
+      `Patient: ${r.patient_first_name} ${r.patient_last_name}, Age: ${r.patient_age ?? 'N/A'}, Gender: ${r.patient_gender ?? 'N/A'}`,
+      `Doctor: ${r.doctor_name ?? 'N/A'} (${r.doctor_specialization ?? 'N/A'})`,
+      `Report date: ${r.report_date ?? 'N/A'}`,
+      `Status: ${r.status}`,
+    ];
+
+    if (r.chief_complaint) lines.push(`Chief complaint: ${r.chief_complaint}`);
+    if (r.assessment)      lines.push(`Doctor's assessment: ${r.assessment}`);
+    if (r.plan)            lines.push(`Treatment plan: ${r.plan}`);
+    if (labLines)          lines.push(`Lab results:\n${labLines}`);
+    if (radioLines)        lines.push(`Radiology results:\n${radioLines}`);
+
+    lines.push(
+      '\nPlease write a short, warm, patient-friendly summary of this medical report in plain English.',
+    );
+
+    const aiSummary = await deepseekChat(lines.join('\n'));
+
+    // Persist to DB
+    await query(
+      'UPDATE medical_reports SET summary = $1, updated_at = NOW() WHERE id = $2',
+      [aiSummary, reportId],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        report_id: reportId,
+        summary:   aiSummary,
+      },
     });
   } catch (err) {
     next(err);
