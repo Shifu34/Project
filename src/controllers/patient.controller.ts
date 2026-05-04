@@ -901,3 +901,170 @@ export const getPatientPrescriptions = async (req: Request, res: Response, next:
     next(err);
   }
 };
+
+// ---------------------------------------------------------------------------
+// GET /patients/me/health-insights
+// Returns latest vitals + lab results with rules-based normal/elevated/low status
+// ---------------------------------------------------------------------------
+
+type InsightStatus = 'normal' | 'elevated' | 'low' | 'critical' | 'unknown';
+
+interface Insight {
+  label: string;
+  value: string;
+  unit: string;
+  status: InsightStatus;
+  category: string;
+}
+
+function classifyNumeric(value: number, lo: number | null, hi: number | null): InsightStatus {
+  if (lo === null && hi === null) return 'unknown';
+  if (lo !== null && value < lo) return 'low';
+  if (hi !== null && value > hi) return 'elevated';
+  return 'normal';
+}
+
+function vitalStatus(key: string, value: number): InsightStatus {
+  switch (key) {
+    case 'blood_pressure_systolic':
+      return value < 90 ? 'low' : value <= 120 ? 'normal' : value <= 139 ? 'elevated' : 'critical';
+    case 'blood_pressure_diastolic':
+      return value < 60 ? 'low' : value <= 80 ? 'normal' : value <= 89 ? 'elevated' : 'critical';
+    case 'heart_rate':
+      return value < 60 ? 'low' : value <= 100 ? 'normal' : 'elevated';
+    case 'respiratory_rate':
+      return value < 12 ? 'low' : value <= 20 ? 'normal' : 'elevated';
+    case 'oxygen_saturation':
+      return value < 90 ? 'critical' : value < 95 ? 'low' : 'normal';
+    case 'temperature':
+      return value < 36.0 ? 'low' : value <= 37.5 ? 'normal' : value <= 38.5 ? 'elevated' : 'critical';
+    case 'blood_glucose':
+      return value < 70 ? 'low' : value <= 99 ? 'normal' : value <= 125 ? 'elevated' : 'critical';
+    case 'bmi':
+      return value < 18.5 ? 'low' : value <= 24.9 ? 'normal' : value <= 29.9 ? 'elevated' : 'critical';
+    default:
+      return 'unknown';
+  }
+}
+
+export const getHealthInsights = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = (req as Request & { user?: { userId: number } }).user?.userId;
+
+    const patResult = await query('SELECT id FROM patients WHERE user_id = $1 LIMIT 1', [userId]);
+    if (patResult.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Patient not found' });
+      return;
+    }
+    const patientId: number = patResult.rows[0].id;
+
+    const [vitalsRes, labRes] = await Promise.all([
+      query(
+        `SELECT temperature, blood_pressure_systolic, blood_pressure_diastolic,
+                heart_rate, respiratory_rate, oxygen_saturation,
+                weight, height, bmi, blood_glucose, recorded_at
+         FROM vitals
+         WHERE patient_id = $1
+         ORDER BY recorded_at DESC
+         LIMIT 1`,
+        [patientId],
+      ),
+      query(
+        `SELECT DISTINCT ON (ltc.id)
+                ltc.name, ltc.category, ltc.unit AS catalog_unit,
+                ltc.lo_bound, ltc.hi_bound,
+                loi.result_value, loi.unit AS result_unit,
+                loi.interpretation, loi.result_date
+         FROM lab_order_items loi
+         JOIN lab_orders lo        ON lo.id  = loi.lab_order_id
+         JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
+         WHERE lo.patient_id = $1
+           AND loi.result_value IS NOT NULL
+           AND loi.status = 'completed'
+         ORDER BY ltc.id, loi.result_date DESC
+         LIMIT 30`,
+        [patientId],
+      ),
+    ]);
+
+    const insights: Insight[] = [];
+
+    // --- Vitals ---
+    if (vitalsRes.rows.length > 0) {
+      const v = vitalsRes.rows[0];
+
+      const vitalMeta: { key: string; label: string; unit: string }[] = [
+        { key: 'blood_pressure_systolic',  label: 'Blood Pressure (Systolic)',  unit: 'mmHg'   },
+        { key: 'blood_pressure_diastolic', label: 'Blood Pressure (Diastolic)', unit: 'mmHg'   },
+        { key: 'heart_rate',               label: 'Heart Rate',                 unit: 'bpm'    },
+        { key: 'respiratory_rate',         label: 'Respiratory Rate',           unit: 'br/min' },
+        { key: 'oxygen_saturation',        label: 'Oxygen Saturation',          unit: '%'      },
+        { key: 'temperature',              label: 'Temperature',                unit: '°C'     },
+        { key: 'blood_glucose',            label: 'Blood Glucose',              unit: 'mg/dL'  },
+        { key: 'bmi',                      label: 'BMI',                        unit: 'kg/m²'  },
+        { key: 'weight',                   label: 'Weight',                     unit: 'kg'     },
+        { key: 'height',                   label: 'Height',                     unit: 'cm'     },
+      ];
+
+      for (const meta of vitalMeta) {
+        const raw = v[meta.key];
+        if (raw === null || raw === undefined) continue;
+        const num = parseFloat(raw);
+        if (isNaN(num)) continue;
+        insights.push({
+          label:    meta.label,
+          value:    num.toString(),
+          unit:     meta.unit,
+          status:   vitalStatus(meta.key, num),
+          category: 'Vitals',
+        });
+      }
+    }
+
+    // --- Lab results ---
+    for (const row of labRes.rows) {
+      const raw = row.result_value as string;
+      const num = parseFloat(raw);
+      const unit: string = (row.result_unit || row.catalog_unit || '') as string;
+
+      let status: InsightStatus = 'unknown';
+      if (!isNaN(num)) {
+        const lo = row.lo_bound !== null ? parseFloat(row.lo_bound) : null;
+        const hi = row.hi_bound !== null ? parseFloat(row.hi_bound) : null;
+        if (lo !== null || hi !== null) {
+          status = classifyNumeric(num, lo, hi);
+        } else if (row.interpretation) {
+          const interp = (row.interpretation as string).toLowerCase();
+          if (interp === 'normal') status = 'normal';
+          else if (['high', 'elevated', 'abnormal'].includes(interp)) status = 'elevated';
+          else if (interp === 'low') status = 'low';
+          else if (interp === 'critical') status = 'critical';
+        }
+      } else if (row.interpretation) {
+        const interp = (row.interpretation as string).toLowerCase();
+        if (interp === 'normal') status = 'normal';
+        else if (['high', 'elevated', 'abnormal'].includes(interp)) status = 'elevated';
+        else if (interp === 'low') status = 'low';
+        else if (interp === 'critical') status = 'critical';
+      }
+
+      insights.push({
+        label:    row.name as string,
+        value:    raw,
+        unit,
+        status,
+        category: (row.category as string) || 'Lab',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        generated_at: new Date().toISOString(),
+        insights,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

@@ -9,8 +9,9 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/',    patientCtrl.getPatients);
-router.get('/me',     patientCtrl.getPatientByUserId);
-router.put('/me',     patientCtrl.updateMyProfile);
+router.get('/me',                 patientCtrl.getPatientByUserId);
+router.put('/me',                 patientCtrl.updateMyProfile);
+router.get('/me/health-insights', patientCtrl.getHealthInsights);
 router.get('/search', patientCtrl.searchPatientsByParams);
 router.get('/:id',    patientCtrl.getPatientById);
 router.get('/:id/appointments',      patientCtrl.getPatientAppointments);
