@@ -321,3 +321,71 @@ export const listRooms = async (_req: AuthRequest, res: Response, next: NextFunc
     next(err);
   }
 };
+
+// ── POST /calls/room/:appointment_id/join  — record that a participant joined ─
+// Called by the FDA agent when doctor or patient connects to the 100ms room.
+// role: 'doctor' | 'patient'
+export const recordJoin = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const appointmentId = parseInt(req.params.appointment_id, 10);
+    const role = req.body.role as string;
+
+    if (!['doctor', 'patient'].includes(role)) {
+      res.status(400).json({ success: false, message: "role must be 'doctor' or 'patient'" });
+      return;
+    }
+
+    const col = role === 'doctor' ? 'doctor_joined_at' : 'patient_joined_at';
+    const updateRoom = await query(
+      `UPDATE video_call_rooms
+       SET ${col} = NOW()
+       WHERE appointment_id = $1
+       RETURNING id, patient_joined_at, doctor_joined_at`,
+      [appointmentId],
+    );
+
+    if (updateRoom.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'No call room found for this appointment' });
+      return;
+    }
+
+    const room = updateRoom.rows[0];
+    const bothJoined = room.patient_joined_at && room.doctor_joined_at;
+
+    // Set appointment in_progress once both sides have joined
+    if (bothJoined) {
+      await query(
+        `UPDATE appointments SET status = 'in_progress'
+         WHERE id = $1 AND status NOT IN ('completed', 'cancelled', 'no_show')`,
+        [appointmentId],
+      );
+    }
+
+    res.json({ success: true, data: { both_joined: bothJoined, room } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── POST /calls/room/:appointment_id/end  — record that the call ended ────────
+export const recordEnd = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const appointmentId = parseInt(req.params.appointment_id, 10);
+
+    await query(
+      `UPDATE video_call_rooms SET ended_at = NOW() WHERE appointment_id = $1`,
+      [appointmentId],
+    );
+
+    // Mark appointment completed
+    await query(
+      `UPDATE appointments SET status = 'completed'
+       WHERE id = $1 AND status NOT IN ('cancelled', 'no_show')`,
+      [appointmentId],
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+};

@@ -12,7 +12,12 @@ const POLL_INTERVAL_MS = 30_000;
  *  1. confirmed/scheduled appointments whose start time has arrived
  *     → status set to 'in_progress'
  *  2. in_progress appointments whose start time + duration_minutes has passed
- *     → status set to 'pending'
+ *     AND a call room exists (someone initiated the call) → status set to 'pending'
+ *  3. scheduled/confirmed/in_progress appointments whose full slot has passed
+ *     AND no call room was ever created (nobody joined) → status set to 'no_show'
+ *  4. scheduled/confirmed/in_progress appointments whose full slot has passed
+ *     AND a room was created but neither doctor nor patient actually joined
+ *     → status set to 'no_show'
  */
 export function startAppointmentStatusJob(): void {
   logger.info('[AppointmentStatusJob] Started — poll interval: 30s');
@@ -40,13 +45,19 @@ export function startAppointmentStatusJob(): void {
         );
       }
 
-      // ── 2. Transition to pending (appointment slot finished) ─────────
+      // ── 2. Transition to pending (appointment slot finished, call happened) ──
+      // Only applies when a room was created AND at least one side joined
       const endedResult = await query(
         `UPDATE appointments
          SET    status = 'pending'
          WHERE  status = 'in_progress'
            AND  (appointment_date + appointment_time) AT TIME ZONE $1
                   + (duration_minutes || ' minutes')::INTERVAL <= NOW()
+           AND  id IN (
+                  SELECT appointment_id FROM video_call_rooms
+                  WHERE  appointment_id IS NOT NULL
+                    AND  (patient_joined_at IS NOT NULL OR doctor_joined_at IS NOT NULL)
+                )
          RETURNING id`,
         [tz],
       );
@@ -55,6 +66,36 @@ export function startAppointmentStatusJob(): void {
         const ids: number[] = endedResult.rows.map((r: { id: number }) => r.id);
         logger.info(
           `[AppointmentStatusJob] Marked pending: [${ids.join(', ')}]`,
+        );
+      }
+
+      // ── 3. Transition to no_show (slot passed, nobody joined) ────────
+      // Covers two cases:
+      //   a) No video_call_rooms row at all (nobody initiated the call)
+      //   b) Room exists but neither side recorded a join timestamp
+      const noShowResult = await query(
+        `UPDATE appointments
+         SET    status = 'no_show'
+         WHERE  status IN ('scheduled', 'confirmed', 'in_progress')
+           AND  (appointment_date + appointment_time) AT TIME ZONE $1
+                  + (COALESCE(duration_minutes, 30) || ' minutes')::INTERVAL <= NOW()
+           AND  (
+                  id NOT IN (SELECT appointment_id FROM video_call_rooms WHERE appointment_id IS NOT NULL)
+                  OR id IN (
+                    SELECT appointment_id FROM video_call_rooms
+                    WHERE  appointment_id IS NOT NULL
+                      AND  patient_joined_at IS NULL
+                      AND  doctor_joined_at IS NULL
+                  )
+                )
+         RETURNING id`,
+        [tz],
+      );
+
+      if (noShowResult.rows.length > 0) {
+        const ids: number[] = noShowResult.rows.map((r: { id: number }) => r.id);
+        logger.info(
+          `[AppointmentStatusJob] Marked no_show: [${ids.join(', ')}]`,
         );
       }
     } catch (err) {
