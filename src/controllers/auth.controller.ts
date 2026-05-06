@@ -84,10 +84,12 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     const isEmail = identifier.includes('@');
     const result = await query(
       `SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name,
-              u.phone, u.cnic, u.is_active,
-              r.id AS role_id, r.name AS role_name, r.permissions
+              u.phone, u.cnic, u.is_active, u.organization_id,
+              r.id AS role_id, r.name AS role_name, r.permissions,
+              o.name AS organization_name
        FROM users u
        JOIN roles r ON r.id = u.role_id
+       LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE ${isEmail ? 'u.email = $1' : 'u.cnic = $1'}`,
       [identifier],
     );
@@ -146,7 +148,13 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       if (doctorRes.rows.length > 0) doctorId = doctorRes.rows[0].id;
     }
 
-    const payload = { userId: user.id, roleId: user.role_id, roleName: user.role_name, email: user.email };
+    const payload = {
+      userId: user.id,
+      roleId: user.role_id,
+      roleName: user.role_name,
+      email: user.email,
+      organizationId: user.organization_id ?? null,
+    };
     const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
     const refreshToken = jwt.sign(payload, env.jwtRefreshSecret, { expiresIn: env.jwtRefreshExpiresIn } as jwt.SignOptions);
 
@@ -166,6 +174,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           cnic: user.cnic,
           gender: patientData.gender ?? null,
           date_of_birth: patientData.date_of_birth ?? null,
+          organization_id: user.organization_id ?? null,
+          organization_name: user.organization_name ?? null,
           ...(doctorId !== null && { doctor_id: doctorId }),
           ...(patientData.id !== undefined && { patient_id: patientData.id }),
         },

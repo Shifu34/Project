@@ -3,9 +3,9 @@
 export interface AuthPayload {
   userId: number;
   roleId: number;
-  roleName: string;
+  roleName: string;   // 'super_admin' | 'admin' | 'doctor' | 'patient'
   email: string;
-  organizationId?: number;
+  organizationId?: number | null;
 }
 
 export interface PaginationQuery {

@@ -15,6 +15,7 @@ import livekitRoutes      from './livekit.routes';
 import reportRoutes              from './report.routes';
 import aiSummaryRoutes           from './ai-summary.routes';
 import callTranscriptionRoutes   from './call-transcription.routes';
+import organizationRoutes        from './organization.routes';
 import { getDashboardStats } from '../controllers/dashboard.controller';
 import { authenticate }   from '../middleware/auth.middleware';
 
@@ -37,6 +38,7 @@ router.use('/livekit',       livekitRoutes);
 router.use('/reports',              reportRoutes);
 router.use('/ai-summaries',         aiSummaryRoutes);
 router.use('/call-transcriptions',  callTranscriptionRoutes);
+router.use('/organizations',        organizationRoutes);
 router.get('/dashboard',     authenticate, getDashboardStats);
 
 export default router;
