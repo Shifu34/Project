@@ -43,6 +43,7 @@ router.use(auth_middleware_1.authenticate);
 router.get('/search', doctorCtrl.searchDoctors);
 router.get('/search-available', doctorCtrl.searchAvailableDoctors);
 router.get('/specializations', doctorCtrl.getAllSpecializations);
+router.get('/stats/departments', doctorCtrl.getDoctorDeptStats);
 router.get('/', doctorCtrl.getDoctors);
 router.get('/me', doctorCtrl.getDoctorByUserId);
 router.get('/:id/profile', doctorCtrl.getDoctorProfile);

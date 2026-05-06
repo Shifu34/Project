@@ -13,6 +13,23 @@ const canDoctorManageProfile = async (req: AuthRequest, doctorId: number): Promi
   return Number(ownDoctor.rows[0].id) === doctorId;
 };
 
+// GET /doctors/stats/departments — department distribution for charts
+export const getDoctorDeptStats = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await query(
+      `SELECT dept.name AS department, COUNT(d.id)::int AS count
+       FROM doctors d
+       LEFT JOIN departments dept ON dept.id = d.department_id
+       GROUP BY dept.name
+       ORDER BY count DESC`,
+      [],
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // GET /doctors
 export const getDoctors = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {

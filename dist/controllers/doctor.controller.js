@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAllSpecializations = exports.getDoctorSpecialization = exports.getDoctorBookedAppointments = exports.deleteDoctorSchedule = exports.updateDoctorSchedule = exports.getDoctorAvailableSlots = exports.addDoctorSchedule = exports.upsertDoctorProfileByDoctor = exports.getDoctorScheduleByDate = exports.getDoctorProfile = exports.searchAvailableDoctors = exports.searchDoctors = exports.getDoctorAppointments = exports.updateDoctor = exports.createDoctor = exports.getDoctorByUserId = exports.getDoctorById = exports.getDoctors = void 0;
+exports.getAllSpecializations = exports.getDoctorSpecialization = exports.getDoctorBookedAppointments = exports.deleteDoctorSchedule = exports.updateDoctorSchedule = exports.getDoctorAvailableSlots = exports.addDoctorSchedule = exports.upsertDoctorProfileByDoctor = exports.getDoctorScheduleByDate = exports.getDoctorProfile = exports.searchAvailableDoctors = exports.searchDoctors = exports.getDoctorAppointments = exports.updateDoctor = exports.createDoctor = exports.getDoctorByUserId = exports.getDoctorById = exports.getDoctors = exports.getDoctorDeptStats = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 const canDoctorManageProfile = async (req, doctorId) => {
@@ -18,6 +18,21 @@ const canDoctorManageProfile = async (req, doctorId) => {
         return false;
     return Number(ownDoctor.rows[0].id) === doctorId;
 };
+// GET /doctors/stats/departments — department distribution for charts
+const getDoctorDeptStats = async (_req, res, next) => {
+    try {
+        const result = await (0, database_1.query)(`SELECT dept.name AS department, COUNT(d.id)::int AS count
+       FROM doctors d
+       LEFT JOIN departments dept ON dept.id = d.department_id
+       GROUP BY dept.name
+       ORDER BY count DESC`, []);
+        res.json({ success: true, data: result.rows });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getDoctorDeptStats = getDoctorDeptStats;
 // GET /doctors
 const getDoctors = async (req, res, next) => {
     try {
