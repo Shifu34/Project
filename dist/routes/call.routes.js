@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const express_validator_1 = require("express-validator");
 const callCtrl = __importStar(require("../controllers/call.controller"));
+const notesCtrl = __importStar(require("../controllers/call-notes.controller"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
@@ -52,5 +53,16 @@ router.patch('/room/:appointment_id/status', (0, auth_middleware_1.authorize)('a
 router.get('/room/:appointment_id/detail', callCtrl.getRoomDetail);
 // List all 100ms rooms
 router.get('/rooms', (0, auth_middleware_1.authorize)('admin'), callCtrl.listRooms);
+// ── AI Notes (real-time, doctor-only) ────────────────────────────────────────
+// POST   /calls/notes              — save a note
+// GET    /calls/notes              — list notes (doctor/admin)
+// GET    /calls/notes/:id          — single note (doctor/admin)
+router.post('/notes', [
+    (0, express_validator_1.body)('appointment_id').isInt({ min: 1 }),
+    (0, express_validator_1.body)('patient_id').isInt({ min: 1 }),
+    (0, express_validator_1.body)('note_type').optional().isIn(['realtime', 'interim', 'final']),
+], validate_middleware_1.validate, notesCtrl.createCallNote);
+router.get('/notes', (0, auth_middleware_1.authorize)('admin', 'doctor'), notesCtrl.getCallNotes);
+router.get('/notes/:id', (0, auth_middleware_1.authorize)('admin', 'doctor'), notesCtrl.getCallNoteById);
 exports.default = router;
 //# sourceMappingURL=call.routes.js.map

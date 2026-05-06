@@ -3,7 +3,7 @@ export interface AuthPayload {
     roleId: number;
     roleName: string;
     email: string;
-    organizationId?: number;
+    organizationId?: number | null;
 }
 export interface PaginationQuery {
     page?: string;

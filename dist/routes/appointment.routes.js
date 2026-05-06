@@ -36,18 +36,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const express_validator_1 = require("express-validator");
 const apptCtrl = __importStar(require("../controllers/appointment.controller"));
+const visit_controller_1 = require("../controllers/visit.controller");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 // Fixed path routes first (before /:id)
-router.get('/', (0, auth_middleware_1.authorize)('admin', 'doctor'), apptCtrl.getAppointments);
+router.get('/', (0, auth_middleware_1.authorize)('admin', 'doctor', 'super_admin'), apptCtrl.getAppointments);
 router.get('/me', apptCtrl.getMyAppointments);
 router.get('/upcoming', apptCtrl.getUpcomingAppointment);
 router.get('/categories', apptCtrl.getAppointmentCategories);
 router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
-router.get('/range', (0, auth_middleware_1.authorize)('admin', 'doctor'), apptCtrl.getAppointmentsByDateRange);
+router.get('/range', (0, auth_middleware_1.authorize)('admin', 'doctor', 'super_admin'), apptCtrl.getAppointmentsByDateRange);
 router.get('/:id', apptCtrl.getAppointmentById);
+// Smart field extraction — works before encounter is created
+router.get('/:id/smart', visit_controller_1.getAppointmentSmart);
 router.get('/:id/encounter', apptCtrl.getAppointmentEncounter);
 router.post('/:id/encounter', (0, auth_middleware_1.authorize)('admin', 'doctor'), apptCtrl.saveAppointmentEncounter);
 router.put('/:id/encounter', (0, auth_middleware_1.authorize)('admin', 'doctor'), apptCtrl.updateAppointmentEncounter);

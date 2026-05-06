@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPatientPrescriptions = exports.getPatientRadiologyOrders = exports.getPatientLabOrders = exports.getPatientEncounters = exports.getPatientMedicalHistory = exports.getPatientVisits = exports.getPatientAppointments = exports.deletePatient = exports.updatePatient = exports.updateMyProfile = exports.createPatient = exports.getPatientByUserId = exports.getPatientById = exports.searchPatientsByParams = exports.getPatients = void 0;
+exports.getHealthInsights = exports.getPatientPrescriptions = exports.getPatientRadiologyOrders = exports.getPatientLabOrders = exports.getPatientEncounters = exports.getPatientMedicalHistory = exports.getPatientVisits = exports.getPatientAppointments = exports.deletePatient = exports.updatePatient = exports.updateMyProfile = exports.createPatient = exports.getPatientByUserId = exports.getPatientById = exports.searchPatientsByParams = exports.getPatients = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 // GET /patients  – paginated list
@@ -709,13 +709,24 @@ const getPatientRadiologyOrders = async (req, res, next) => {
 };
 exports.getPatientRadiologyOrders = getPatientRadiologyOrders;
 // ─── API 6 ──────────────────────────────────────────────────────────────────
-// GET /patients/:id/prescriptions?page=&limit=
+// GET /patients/:id/prescriptions?page=&limit=&status=
 const getPatientPrescriptions = async (req, res, next) => {
     try {
         const patientId = req.params.id;
         const page = Math.max(1, parseInt(req.query.page || '1', 10));
         const limit = Math.min(100, parseInt(req.query.limit || '20', 10));
+        const status = req.query.status;
         const offset = (page - 1) * limit;
+        const params = [limit, offset, patientId];
+        const countParams = [patientId];
+        let statusClause = '';
+        let countStatusClause = '';
+        if (status) {
+            statusClause = `AND p.status = $${params.length + 1}`;
+            countStatusClause = `AND status = $${countParams.length + 1}`;
+            params.push(status);
+            countParams.push(status);
+        }
         const [dataRes, countRes] = await Promise.all([
             (0, database_1.query)(`SELECT p.id, p.encounter_id, p.prescription_date, p.valid_until, p.status, p.notes,
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
@@ -737,11 +748,11 @@ const getPatientPrescriptions = async (req, res, next) => {
          JOIN doctors d ON d.id = p.doctor_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
-         WHERE p.patient_id = $3
+         WHERE p.patient_id = $3 ${statusClause}
          GROUP BY p.id, u.first_name, u.last_name, d.specialization
          ORDER BY p.prescription_date DESC
-         LIMIT $1 OFFSET $2`, [limit, offset, patientId]),
-            (0, database_1.query)(`SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1`, [patientId]),
+         LIMIT $1 OFFSET $2`, params),
+            (0, database_1.query)(`SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1 ${countStatusClause}`, countParams),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({
@@ -755,4 +766,154 @@ const getPatientPrescriptions = async (req, res, next) => {
     }
 };
 exports.getPatientPrescriptions = getPatientPrescriptions;
+function classifyNumeric(value, lo, hi) {
+    if (lo === null && hi === null)
+        return 'unknown';
+    if (lo !== null && value < lo)
+        return 'low';
+    if (hi !== null && value > hi)
+        return 'elevated';
+    return 'normal';
+}
+function vitalStatus(key, value) {
+    switch (key) {
+        case 'blood_pressure_systolic':
+            return value < 90 ? 'low' : value <= 120 ? 'normal' : value <= 139 ? 'elevated' : 'critical';
+        case 'blood_pressure_diastolic':
+            return value < 60 ? 'low' : value <= 80 ? 'normal' : value <= 89 ? 'elevated' : 'critical';
+        case 'heart_rate':
+            return value < 60 ? 'low' : value <= 100 ? 'normal' : 'elevated';
+        case 'respiratory_rate':
+            return value < 12 ? 'low' : value <= 20 ? 'normal' : 'elevated';
+        case 'oxygen_saturation':
+            return value < 90 ? 'critical' : value < 95 ? 'low' : 'normal';
+        case 'temperature':
+            return value < 36.0 ? 'low' : value <= 37.5 ? 'normal' : value <= 38.5 ? 'elevated' : 'critical';
+        case 'blood_glucose':
+            return value < 70 ? 'low' : value <= 99 ? 'normal' : value <= 125 ? 'elevated' : 'critical';
+        case 'bmi':
+            return value < 18.5 ? 'low' : value <= 24.9 ? 'normal' : value <= 29.9 ? 'elevated' : 'critical';
+        default:
+            return 'unknown';
+    }
+}
+const getHealthInsights = async (req, res, next) => {
+    try {
+        const userId = req.user?.userId;
+        const patResult = await (0, database_1.query)('SELECT id FROM patients WHERE user_id = $1 LIMIT 1', [userId]);
+        if (patResult.rows.length === 0) {
+            res.status(404).json({ success: false, message: 'Patient not found' });
+            return;
+        }
+        const patientId = patResult.rows[0].id;
+        const [vitalsRes, labRes] = await Promise.all([
+            (0, database_1.query)(`SELECT temperature, blood_pressure_systolic, blood_pressure_diastolic,
+                heart_rate, respiratory_rate, oxygen_saturation,
+                weight, height, bmi, blood_glucose, recorded_at
+         FROM vitals
+         WHERE patient_id = $1
+         ORDER BY recorded_at DESC
+         LIMIT 1`, [patientId]),
+            (0, database_1.query)(`SELECT DISTINCT ON (ltc.id)
+                ltc.name, ltc.category, ltc.unit AS catalog_unit,
+                ltc.lo_bound, ltc.hi_bound,
+                loi.result_value, loi.unit AS result_unit,
+                loi.interpretation, loi.result_date
+         FROM lab_order_items loi
+         JOIN lab_orders lo        ON lo.id  = loi.lab_order_id
+         JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
+         WHERE lo.patient_id = $1
+           AND loi.result_value IS NOT NULL
+           AND loi.status = 'completed'
+         ORDER BY ltc.id, loi.result_date DESC
+         LIMIT 30`, [patientId]),
+        ]);
+        const insights = [];
+        // --- Vitals ---
+        if (vitalsRes.rows.length > 0) {
+            const v = vitalsRes.rows[0];
+            const vitalMeta = [
+                { key: 'blood_pressure_systolic', label: 'Blood Pressure (Systolic)', unit: 'mmHg' },
+                { key: 'blood_pressure_diastolic', label: 'Blood Pressure (Diastolic)', unit: 'mmHg' },
+                { key: 'heart_rate', label: 'Heart Rate', unit: 'bpm' },
+                { key: 'respiratory_rate', label: 'Respiratory Rate', unit: 'br/min' },
+                { key: 'oxygen_saturation', label: 'Oxygen Saturation', unit: '%' },
+                { key: 'temperature', label: 'Temperature', unit: '°C' },
+                { key: 'blood_glucose', label: 'Blood Glucose', unit: 'mg/dL' },
+                { key: 'bmi', label: 'BMI', unit: 'kg/m²' },
+                { key: 'weight', label: 'Weight', unit: 'kg' },
+                { key: 'height', label: 'Height', unit: 'cm' },
+            ];
+            for (const meta of vitalMeta) {
+                const raw = v[meta.key];
+                if (raw === null || raw === undefined)
+                    continue;
+                const num = parseFloat(raw);
+                if (isNaN(num))
+                    continue;
+                insights.push({
+                    label: meta.label,
+                    value: num.toString(),
+                    unit: meta.unit,
+                    status: vitalStatus(meta.key, num),
+                    category: 'Vitals',
+                });
+            }
+        }
+        // --- Lab results ---
+        for (const row of labRes.rows) {
+            const raw = row.result_value;
+            const num = parseFloat(raw);
+            const unit = (row.result_unit || row.catalog_unit || '');
+            let status = 'unknown';
+            if (!isNaN(num)) {
+                const lo = row.lo_bound !== null ? parseFloat(row.lo_bound) : null;
+                const hi = row.hi_bound !== null ? parseFloat(row.hi_bound) : null;
+                if (lo !== null || hi !== null) {
+                    status = classifyNumeric(num, lo, hi);
+                }
+                else if (row.interpretation) {
+                    const interp = row.interpretation.toLowerCase();
+                    if (interp === 'normal')
+                        status = 'normal';
+                    else if (['high', 'elevated', 'abnormal'].includes(interp))
+                        status = 'elevated';
+                    else if (interp === 'low')
+                        status = 'low';
+                    else if (interp === 'critical')
+                        status = 'critical';
+                }
+            }
+            else if (row.interpretation) {
+                const interp = row.interpretation.toLowerCase();
+                if (interp === 'normal')
+                    status = 'normal';
+                else if (['high', 'elevated', 'abnormal'].includes(interp))
+                    status = 'elevated';
+                else if (interp === 'low')
+                    status = 'low';
+                else if (interp === 'critical')
+                    status = 'critical';
+            }
+            insights.push({
+                label: row.name,
+                value: raw,
+                unit,
+                status,
+                category: row.category || 'Lab',
+            });
+        }
+        res.json({
+            success: true,
+            data: {
+                generated_at: new Date().toISOString(),
+                insights,
+            },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.getHealthInsights = getHealthInsights;
 //# sourceMappingURL=patient.controller.js.map

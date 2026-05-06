@@ -18,5 +18,6 @@ export declare const env: {
     livekitApiSecret: string;
     livekitUrl: string;
     appTimezone: string;
+    deepseekApiKey: string;
 };
 //# sourceMappingURL=env.d.ts.map

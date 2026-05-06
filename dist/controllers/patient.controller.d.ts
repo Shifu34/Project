@@ -15,4 +15,5 @@ export declare const getPatientEncounters: (req: Request, res: Response, next: N
 export declare const getPatientLabOrders: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getPatientRadiologyOrders: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const getPatientPrescriptions: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const getHealthInsights: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 //# sourceMappingURL=patient.controller.d.ts.map

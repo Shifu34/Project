@@ -40,17 +40,59 @@ function hmsRequest(method, path, body) {
         req.end();
     });
 }
+// ── helper: generic JSON POST to an external HTTPS endpoint ────
+function httpPost(hostname, path, body) {
+    return new Promise((resolve, reject) => {
+        const data = JSON.stringify(body);
+        const req = https_1.default.request({
+            hostname,
+            path,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(data),
+            },
+        }, (res) => {
+            res.resume(); // drain response
+            res.on('end', () => {
+                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                    resolve();
+                }
+                else {
+                    reject(new Error(`POST ${hostname}${path} returned ${res.statusCode}`));
+                }
+            });
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+    });
+}
 // ── POST /calls/room  — create room + get codes ───────────────
 const createCallRoom = async (req, res, next) => {
     try {
+        if (!env_1.env.hmsManagementToken) {
+            res.status(503).json({ success: false, message: 'HMS_MANAGEMENT_TOKEN is not configured on the server' });
+            return;
+        }
         const { appointment_id } = req.body;
         if (!appointment_id) {
             res.status(400).json({ success: false, message: 'appointment_id is required' });
             return;
         }
         // 1. Fetch appointment ------------------------------------------------
-        const apptResult = await (0, database_1.query)(`SELECT a.id, a.patient_id, a.doctor_id, a.appointment_type, a.reason
+        const apptResult = await (0, database_1.query)(`SELECT a.id, a.patient_id, a.doctor_id, a.appointment_type, a.reason,
+              p.first_name || ' ' || p.last_name AS patient_name,
+              d.first_name || ' ' || d.last_name AS doctor_name,
+              d.user_id AS doctor_user_id,
+              u.role_id AS doctor_role_id,
+              r.name AS doctor_role_name,
+              u.email AS doctor_email
        FROM appointments a
+       JOIN patients p ON p.id = a.patient_id
+       JOIN doctors  d ON d.id = a.doctor_id
+       LEFT JOIN users u ON u.id = d.user_id
+       LEFT JOIN roles r ON r.id = u.role_id
        WHERE a.id = $1`, [appointment_id]);
         if (apptResult.rows.length === 0) {
             res.status(404).json({ success: false, message: 'Appointment not found' });
@@ -87,9 +129,38 @@ const createCallRoom = async (req, res, next) => {
          (appointment_id, patient_id, doctor_id, room_id, patient_room_code, doctor_room_code)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`, [appointment_id, appt.patient_id, appt.doctor_id, roomId, patientRoomCode, doctorRoomCode]);
+        // 5. Notify FDA agent — awaited so registration completes BEFORE
+        //    room codes are returned to Flutter (Flutter must not connect first)
+        try {
+            // Generate a fresh JWT for the doctor so the FDA agent can authenticate
+            // back to the hospital backend on behalf of the doctor
+            const doctorPayload = {
+                userId: appt.doctor_user_id,
+                roleId: appt.doctor_role_id,
+                roleName: appt.doctor_role_name ?? 'doctor',
+                email: appt.doctor_email,
+            };
+            const doctorToken = jsonwebtoken_1.default.sign(doctorPayload, env_1.env.jwtSecret, { expiresIn: env_1.env.jwtExpiresIn });
+            await httpPost('mh-fda-agent-production-3e20.up.railway.app', '/register-room', {
+                room_id: roomId,
+                appointment_id,
+                patient_id: appt.patient_id,
+                doctor_id: appt.doctor_id,
+                doctor_name: `Dr. ${appt.doctor_name}`,
+                patient_name: appt.patient_name,
+                doctor_token: doctorToken,
+            });
+        }
+        catch (fdaErr) {
+            // Log but do not block the response — room was already created in 100ms + DB
+            console.error('[register-room] notification failed:', fdaErr);
+        }
         res.status(201).json({ success: true, data: insertResult.rows[0] });
     }
     catch (err) {
+        // Surface the real error message so it appears in Railway logs and debug responses
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[createCallRoom] error:', message);
         next(err);
     }
 };

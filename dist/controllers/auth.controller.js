@@ -69,10 +69,12 @@ const login = async (req, res, next) => {
         const { identifier, password } = req.body;
         const isEmail = identifier.includes('@');
         const result = await (0, database_1.query)(`SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name,
-              u.phone, u.cnic, u.is_active,
-              r.id AS role_id, r.name AS role_name, r.permissions
+              u.phone, u.cnic, u.is_active, u.organization_id,
+              r.id AS role_id, r.name AS role_name, r.permissions,
+              o.name AS organization_name
        FROM users u
        JOIN roles r ON r.id = u.role_id
+       LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE ${isEmail ? 'u.email = $1' : 'u.cnic = $1'}`, [identifier]);
         if (result.rows.length === 0) {
             res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -115,7 +117,13 @@ const login = async (req, res, next) => {
             if (doctorRes.rows.length > 0)
                 doctorId = doctorRes.rows[0].id;
         }
-        const payload = { userId: user.id, roleId: user.role_id, roleName: user.role_name, email: user.email };
+        const payload = {
+            userId: user.id,
+            roleId: user.role_id,
+            roleName: user.role_name,
+            email: user.email,
+            organizationId: user.organization_id ?? null,
+        };
         const token = jsonwebtoken_1.default.sign(payload, env_1.env.jwtSecret, { expiresIn: env_1.env.jwtExpiresIn });
         const refreshToken = jsonwebtoken_1.default.sign(payload, env_1.env.jwtRefreshSecret, { expiresIn: env_1.env.jwtRefreshExpiresIn });
         res.json({
@@ -134,6 +142,8 @@ const login = async (req, res, next) => {
                     cnic: user.cnic,
                     gender: patientData.gender ?? null,
                     date_of_birth: patientData.date_of_birth ?? null,
+                    organization_id: user.organization_id ?? null,
+                    organization_name: user.organization_name ?? null,
                     ...(doctorId !== null && { doctor_id: doctorId }),
                     ...(patientData.id !== undefined && { patient_id: patientData.id }),
                 },

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getEncounterFull = exports.getEncounterVitals = exports.addClinicalNote = exports.getVisitDiagnoses = exports.addDiagnosis = exports.recordVitalSigns = exports.updateVisit = exports.getVisitById = exports.createVisit = void 0;
+exports.getAppointmentSmart = exports.getEncounterSmart = exports.getEncounterFull = exports.getEncounterVitals = exports.addClinicalNote = exports.getVisitDiagnoses = exports.addDiagnosis = exports.recordVitalSigns = exports.updateVisit = exports.getVisitById = exports.createVisit = void 0;
 const database_1 = require("../config/database");
 // POST /encounters  – open a clinical encounter
 const createVisit = async (req, res, next) => {
@@ -253,4 +253,134 @@ const getEncounterFull = async (req, res, next) => {
     }
 };
 exports.getEncounterFull = getEncounterFull;
+// ─── Smart Encounter ─────────────────────────────────────────────────────────
+// GET /encounters/:id/smart?fields=chief_complaint,diagnosis,bp,...
+//
+// Extracts requested field values from three sources (in priority order):
+//   1. call_ai_notes.structured_data   (real-time AI notes, doctor-only)
+//   2. ai_summaries.structured_data    (post-call summary, summary_type='call')
+//   3. clinical_notes.content          (raw text from doctor, returned as-is)
+//
+// Response per field: { value: string, source: 'ai_notes'|'call_summary'|null }
+// Also returns raw text from call summary + doctor notes for full context.
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared logic for smart field extraction — works from either encounter or
+// appointment context.  Called by both:
+//   GET /encounters/:id/smart
+//   GET /appointments/:id/smart
+// ─────────────────────────────────────────────────────────────────────────────
+async function runSmartQuery(res, next, appointmentId, encounterId, requestedFields) {
+    try {
+        // Resolve the other ID if only one is supplied
+        let resolvedEncounterId = encounterId;
+        let resolvedAppointmentId = appointmentId;
+        let patientId = null;
+        let doctorId = null;
+        if (encounterId) {
+            const encRes = await (0, database_1.query)(`SELECT id, appointment_id, patient_id, doctor_id FROM encounters WHERE id = $1`, [encounterId]);
+            if (encRes.rows.length === 0) {
+                res.status(404).json({ success: false, message: 'Encounter not found' });
+                return;
+            }
+            resolvedAppointmentId = encRes.rows[0].appointment_id;
+            patientId = encRes.rows[0].patient_id;
+            doctorId = encRes.rows[0].doctor_id;
+        }
+        else if (appointmentId) {
+            const apptRes = await (0, database_1.query)(`SELECT a.id, a.patient_id, a.doctor_id,
+                e.id AS encounter_id
+         FROM appointments a
+         LEFT JOIN encounters e ON e.appointment_id = a.id
+         WHERE a.id = $1
+         ORDER BY e.created_at DESC
+         LIMIT 1`, [appointmentId]);
+            if (apptRes.rows.length === 0) {
+                res.status(404).json({ success: false, message: 'Appointment not found' });
+                return;
+            }
+            patientId = apptRes.rows[0].patient_id;
+            doctorId = apptRes.rows[0].doctor_id;
+            resolvedEncounterId = apptRes.rows[0].encounter_id ?? null;
+        }
+        else {
+            res.status(400).json({ success: false, message: 'encounter_id or appointment_id is required' });
+            return;
+        }
+        // Fetch all data sources in parallel
+        const [aiNotesRes, callSummaryRes, doctorNotesRes] = await Promise.all([
+            (0, database_1.query)(`SELECT structured_data, content, note_type, created_at
+         FROM call_ai_notes
+         WHERE appointment_id = $1
+         ORDER BY
+           CASE note_type WHEN 'final' THEN 1 WHEN 'interim' THEN 2 ELSE 3 END,
+           created_at DESC`, [resolvedAppointmentId]),
+            (0, database_1.query)(`SELECT structured_data, content, created_at
+         FROM ai_summaries
+         WHERE appointment_id = $1 AND summary_type = 'call'
+         ORDER BY created_at DESC
+         LIMIT 1`, [resolvedAppointmentId]),
+            resolvedEncounterId
+                ? (0, database_1.query)(`SELECT content, note_type, created_at
+             FROM clinical_notes
+             WHERE encounter_id = $1
+             ORDER BY created_at DESC`, [resolvedEncounterId])
+                : Promise.resolve({ rows: [] }),
+        ]);
+        // Merge structured_data (priority: final > interim > realtime)
+        const aiStructured = {};
+        for (const row of [...aiNotesRes.rows].reverse()) {
+            if (row.structured_data && typeof row.structured_data === 'object') {
+                Object.assign(aiStructured, row.structured_data);
+            }
+        }
+        const summaryStructured = callSummaryRes.rows[0]?.structured_data ?? {};
+        // Extract requested fields
+        const fields = {};
+        for (const field of requestedFields) {
+            const fromAiNotes = aiStructured[field] ?? aiStructured[field.toLowerCase()];
+            const fromSummary = summaryStructured[field] ?? summaryStructured[field.toLowerCase()];
+            if (fromAiNotes !== undefined && fromAiNotes !== null && String(fromAiNotes).trim() !== '') {
+                fields[field] = { value: String(fromAiNotes), source: 'ai_notes' };
+            }
+            else if (fromSummary !== undefined && fromSummary !== null && String(fromSummary).trim() !== '') {
+                fields[field] = { value: String(fromSummary), source: 'call_summary' };
+            }
+            else {
+                fields[field] = { value: '', source: null };
+            }
+        }
+        res.json({
+            success: true,
+            data: {
+                encounter_id: resolvedEncounterId,
+                appointment_id: resolvedAppointmentId,
+                patient_id: patientId,
+                doctor_id: doctorId,
+                fields,
+                call_summary_raw: callSummaryRes.rows[0]?.content ?? null,
+                doctor_notes_raw: doctorNotesRes.rows.map(r => r.content).join('\n\n') || null,
+                ai_notes_raw: aiNotesRes.rows.map(r => r.content).filter(Boolean).join('\n\n') || null,
+            },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// GET /encounters/:id/smart?fields=...
+const getEncounterSmart = async (req, res, next) => {
+    const requestedFields = (req.query.fields || '')
+        .split(',').map(f => f.trim()).filter(Boolean);
+    await runSmartQuery(res, next, null, Number(req.params.id), requestedFields);
+};
+exports.getEncounterSmart = getEncounterSmart;
+// GET /appointments/:id/smart?fields=...
+// Works BEFORE an encounter exists — only appointment_id is needed
+const getAppointmentSmart = async (req, res, next) => {
+    const requestedFields = (req.query.fields || '')
+        .split(',').map(f => f.trim()).filter(Boolean);
+    await runSmartQuery(res, next, Number(req.params.id), null, requestedFields);
+};
+exports.getAppointmentSmart = getAppointmentSmart;
 //# sourceMappingURL=visit.controller.js.map
