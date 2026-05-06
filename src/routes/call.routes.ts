@@ -40,22 +40,6 @@ router.get('/room/:appointment_id/detail', callCtrl.getRoomDetail);
 // List all 100ms rooms
 router.get('/rooms', authorize('admin'), callCtrl.listRooms);
 
-// Record that a participant joined the call (called by FDA agent)
-router.post(
-  '/room/:appointment_id/join',
-  authorize('admin', 'doctor', 'patient'),
-  body('role').isIn(['doctor', 'patient']),
-  validate,
-  callCtrl.recordJoin,
-);
-
-// Record that the call ended (called by FDA agent or doctor)
-router.post(
-  '/room/:appointment_id/end',
-  authorize('admin', 'doctor', 'patient'),
-  callCtrl.recordEnd,
-);
-
 // ── AI Notes (real-time, doctor-only) ────────────────────────────────────────
 // POST   /calls/notes              — save a note
 // GET    /calls/notes              — list notes (doctor/admin)
