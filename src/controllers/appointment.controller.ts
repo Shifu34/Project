@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 // GET /appointments
 export const getAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const authReq = req as import('../middleware/auth.middleware').AuthRequest;
     const page   = Math.max(1,   parseInt(req.query.page as string || '1',  10));
     const size   = Math.min(100, parseInt((req.query.size || req.query.limit) as string || '20', 10));
     const date   = req.query.date   as string | undefined;
@@ -14,6 +15,10 @@ export const getAppointments = async (req: Request, res: Response, next: NextFun
     const conditions: string[] = [];
     const params: unknown[] = [size, offset];
     let idx = 3;
+
+    // Org-scoping: org admins only see their own org's appointments
+    const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
+    if (orgId) { conditions.push(`a.organization_id = $${idx++}`); params.push(orgId); }
 
     if (date)   { conditions.push(`a.appointment_date = $${idx++}`); params.push(date); }
     if (status) { conditions.push(`a.status = $${idx++}`); params.push(status); }
@@ -1039,6 +1044,7 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
 // GET /appointments/range?start=YYYY-MM-DD&end=YYYY-MM-DD[&status=confirmed]
 export const getAppointmentsByDateRange = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const authReq = req as import('../middleware/auth.middleware').AuthRequest;
     const { start, end, status } = req.query as { start?: string; end?: string; status?: string };
 
     if (!start || !end) {
@@ -1057,12 +1063,17 @@ export const getAppointmentsByDateRange = async (req: Request, res: Response, ne
       return;
     }
 
+    // Org-scoping: org admins only see their own org's appointments
+    const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
+
     const params: unknown[] = [start, end];
-    let statusFilter = '';
-    if (status) {
-      params.push(status);
-      statusFilter = `AND a.status = $3`;
-    }
+    let idx = 3;
+    const extraFilters: string[] = [];
+
+    if (orgId) { extraFilters.push(`a.organization_id = $${idx++}`); params.push(orgId); }
+    if (status) { extraFilters.push(`a.status = $${idx++}`); params.push(status); }
+
+    const extraWhere = extraFilters.length ? `AND ${extraFilters.join(' AND ')}` : '';
 
     const result = await query(
       `SELECT a.*,
@@ -1075,7 +1086,7 @@ export const getAppointmentsByDateRange = async (req: Request, res: Response, ne
        JOIN   users u       ON u.id   = doc.user_id
        LEFT JOIN departments dept ON dept.id = a.department_id
        WHERE  a.appointment_date BETWEEN $1 AND $2
-       ${statusFilter}
+       ${extraWhere}
        ORDER BY a.appointment_date ASC, a.appointment_time ASC`,
       params,
     );

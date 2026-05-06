@@ -5,6 +5,7 @@ const database_1 = require("../config/database");
 // GET /appointments
 const getAppointments = async (req, res, next) => {
     try {
+        const authReq = req;
         const page = Math.max(1, parseInt(req.query.page || '1', 10));
         const size = Math.min(100, parseInt((req.query.size || req.query.limit) || '20', 10));
         const date = req.query.date;
@@ -13,6 +14,12 @@ const getAppointments = async (req, res, next) => {
         const conditions = [];
         const params = [size, offset];
         let idx = 3;
+        // Org-scoping: org admins only see their own org's appointments
+        const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
+        if (orgId) {
+            conditions.push(`a.organization_id = $${idx++}`);
+            params.push(orgId);
+        }
         if (date) {
             conditions.push(`a.appointment_date = $${idx++}`);
             params.push(date);
@@ -878,6 +885,7 @@ exports.updateAppointmentEncounter = updateAppointmentEncounter;
 // GET /appointments/range?start=YYYY-MM-DD&end=YYYY-MM-DD[&status=confirmed]
 const getAppointmentsByDateRange = async (req, res, next) => {
     try {
+        const authReq = req;
         const { start, end, status } = req.query;
         if (!start || !end) {
             res.status(400).json({ success: false, message: 'start and end query params are required (YYYY-MM-DD)' });
@@ -892,12 +900,20 @@ const getAppointmentsByDateRange = async (req, res, next) => {
             res.status(400).json({ success: false, message: 'start date must not be after end date' });
             return;
         }
+        // Org-scoping: org admins only see their own org's appointments
+        const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
         const params = [start, end];
-        let statusFilter = '';
-        if (status) {
-            params.push(status);
-            statusFilter = `AND a.status = $3`;
+        let idx = 3;
+        const extraFilters = [];
+        if (orgId) {
+            extraFilters.push(`a.organization_id = $${idx++}`);
+            params.push(orgId);
         }
+        if (status) {
+            extraFilters.push(`a.status = $${idx++}`);
+            params.push(status);
+        }
+        const extraWhere = extraFilters.length ? `AND ${extraFilters.join(' AND ')}` : '';
         const result = await (0, database_1.query)(`SELECT a.*,
               CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code, p.phone AS patient_phone,
               CONCAT(u.first_name,' ',u.last_name) AS doctor_name, doc.specialization,
@@ -908,7 +924,7 @@ const getAppointmentsByDateRange = async (req, res, next) => {
        JOIN   users u       ON u.id   = doc.user_id
        LEFT JOIN departments dept ON dept.id = a.department_id
        WHERE  a.appointment_date BETWEEN $1 AND $2
-       ${statusFilter}
+       ${extraWhere}
        ORDER BY a.appointment_date ASC, a.appointment_time ASC`, params);
         res.json({ success: true, data: result.rows, total: result.rows.length });
     }
