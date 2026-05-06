@@ -10,12 +10,12 @@ const router = Router();
 router.use(authenticate);
 
 // Fixed path routes first (before /:id)
-router.get('/',                 authorize('admin', 'doctor'), apptCtrl.getAppointments);
+router.get('/',                 authorize('admin', 'doctor', 'super_admin'), apptCtrl.getAppointments);
 router.get('/me',               apptCtrl.getMyAppointments);
 router.get('/upcoming',         apptCtrl.getUpcomingAppointment);
 router.get('/categories',       apptCtrl.getAppointmentCategories);
 router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
-router.get('/range',            authorize('admin', 'doctor'), apptCtrl.getAppointmentsByDateRange);
+router.get('/range',            authorize('admin', 'doctor', 'super_admin'), apptCtrl.getAppointmentsByDateRange);
 router.get('/:id',              apptCtrl.getAppointmentById);
 
 // Smart field extraction — works before encounter is created

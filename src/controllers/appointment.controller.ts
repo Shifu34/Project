@@ -6,7 +6,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 export const getAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const page   = Math.max(1,   parseInt(req.query.page as string || '1',  10));
-    const size   = Math.min(100, parseInt(req.query.size as string || '20', 10));
+    const size   = Math.min(100, parseInt((req.query.size || req.query.limit) as string || '20', 10));
     const date   = req.query.date   as string | undefined;
     const status = req.query.status as string | undefined;
     const offset = (page - 1) * size;
