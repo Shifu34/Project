@@ -11,24 +11,34 @@ const getAppointments = async (req, res, next) => {
         const date = req.query.date;
         const status = req.query.status;
         const offset = (page - 1) * size;
-        const conditions = [];
-        const params = [size, offset];
-        let idx = 3;
+        const mainParams = [size, offset];
+        const countParams = [];
+        const mainConditions = [];
+        const countConditions = [];
+        let mainIdx = 3;
+        let countIdx = 1;
         // Org-scoping: org admins only see their own org's appointments
         const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
         if (orgId) {
-            conditions.push(`a.organization_id = $${idx++}`);
-            params.push(orgId);
+            mainConditions.push(`a.organization_id = $${mainIdx++}`);
+            countConditions.push(`a.organization_id = $${countIdx++}`);
+            mainParams.push(orgId);
+            countParams.push(orgId);
         }
         if (date) {
-            conditions.push(`a.appointment_date = $${idx++}`);
-            params.push(date);
+            mainConditions.push(`a.appointment_date = $${mainIdx++}`);
+            countConditions.push(`a.appointment_date = $${countIdx++}`);
+            mainParams.push(date);
+            countParams.push(date);
         }
         if (status) {
-            conditions.push(`a.status = $${idx++}`);
-            params.push(status);
+            mainConditions.push(`a.status = $${mainIdx++}`);
+            countConditions.push(`a.status = $${countIdx++}`);
+            mainParams.push(status);
+            countParams.push(status);
         }
-        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        const mainWhere = mainConditions.length ? `WHERE ${mainConditions.join(' AND ')}` : '';
+        const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
         const [dataRes, countRes] = await Promise.all([
             (0, database_1.query)(`SELECT a.*,
                 CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
@@ -39,10 +49,10 @@ const getAppointments = async (req, res, next) => {
          JOIN doctors doc ON doc.id = a.doctor_id
          JOIN users u ON u.id = doc.user_id
          LEFT JOIN departments dept ON dept.id = a.department_id
-         ${where}
+         ${mainWhere}
          ORDER BY a.appointment_date DESC, a.appointment_time DESC
-         LIMIT $1 OFFSET $2`, params),
-            (0, database_1.query)(`SELECT COUNT(*) FROM appointments a ${where}`, conditions.length ? params.slice(2) : []),
+         LIMIT $1 OFFSET $2`, mainParams),
+            (0, database_1.query)(`SELECT COUNT(*) FROM appointments a ${countWhere}`, countParams),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({ success: true, data: dataRes.rows, pagination: { total, page, size, totalPages: Math.ceil(total / size) } });

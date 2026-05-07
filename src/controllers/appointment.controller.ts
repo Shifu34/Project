@@ -12,18 +12,36 @@ export const getAppointments = async (req: Request, res: Response, next: NextFun
     const status = req.query.status as string | undefined;
     const offset = (page - 1) * size;
 
-    const conditions: string[] = [];
-    const params: unknown[] = [size, offset];
-    let idx = 3;
+    const mainParams: unknown[] = [size, offset];
+    const countParams: unknown[] = [];
+    const mainConditions: string[] = [];
+    const countConditions: string[] = [];
+    let mainIdx = 3;
+    let countIdx = 1;
 
     // Org-scoping: org admins only see their own org's appointments
     const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
-    if (orgId) { conditions.push(`a.organization_id = $${idx++}`); params.push(orgId); }
+    if (orgId) {
+      mainConditions.push(`a.organization_id = $${mainIdx++}`);
+      countConditions.push(`a.organization_id = $${countIdx++}`);
+      mainParams.push(orgId);
+      countParams.push(orgId);
+    }
+    if (date) {
+      mainConditions.push(`a.appointment_date = $${mainIdx++}`);
+      countConditions.push(`a.appointment_date = $${countIdx++}`);
+      mainParams.push(date);
+      countParams.push(date);
+    }
+    if (status) {
+      mainConditions.push(`a.status = $${mainIdx++}`);
+      countConditions.push(`a.status = $${countIdx++}`);
+      mainParams.push(status);
+      countParams.push(status);
+    }
 
-    if (date)   { conditions.push(`a.appointment_date = $${idx++}`); params.push(date); }
-    if (status) { conditions.push(`a.status = $${idx++}`); params.push(status); }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const mainWhere  = mainConditions.length  ? `WHERE ${mainConditions.join(' AND ')}`  : '';
+    const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
 
     const [dataRes, countRes] = await Promise.all([
       query(
@@ -36,12 +54,12 @@ export const getAppointments = async (req: Request, res: Response, next: NextFun
          JOIN doctors doc ON doc.id = a.doctor_id
          JOIN users u ON u.id = doc.user_id
          LEFT JOIN departments dept ON dept.id = a.department_id
-         ${where}
+         ${mainWhere}
          ORDER BY a.appointment_date DESC, a.appointment_time DESC
          LIMIT $1 OFFSET $2`,
-        params,
+        mainParams,
       ),
-      query(`SELECT COUNT(*) FROM appointments a ${where}`, conditions.length ? params.slice(2) : []),
+      query(`SELECT COUNT(*) FROM appointments a ${countWhere}`, countParams),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);

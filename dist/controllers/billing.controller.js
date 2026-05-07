@@ -63,18 +63,26 @@ const getPayments = async (req, res, next) => {
         const patientId = req.query.patient_id;
         const status = req.query.status;
         const offset = (page - 1) * limit;
-        const conditions = [];
-        const params = [limit, offset];
-        let idx = 3;
+        const mainParams = [limit, offset];
+        const countParams = [];
+        const mainConditions = [];
+        const countConditions = [];
+        let mainIdx = 3;
+        let countIdx = 1;
         if (patientId) {
-            conditions.push(`py.patient_id = $${idx++}`);
-            params.push(patientId);
+            mainConditions.push(`py.patient_id = $${mainIdx++}`);
+            countConditions.push(`py.patient_id = $${countIdx++}`);
+            mainParams.push(patientId);
+            countParams.push(patientId);
         }
         if (status) {
-            conditions.push(`py.payment_status = $${idx++}`);
-            params.push(status);
+            mainConditions.push(`py.payment_status = $${mainIdx++}`);
+            countConditions.push(`py.payment_status = $${countIdx++}`);
+            mainParams.push(status);
+            countParams.push(status);
         }
-        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        const mainWhere = mainConditions.length ? `WHERE ${mainConditions.join(' AND ')}` : '';
+        const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
         const [dataRes, countRes] = await Promise.all([
             (0, database_1.query)(`SELECT py.*,
                 CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
@@ -82,9 +90,9 @@ const getPayments = async (req, res, next) => {
          FROM payments py
          JOIN patients p ON p.id = py.patient_id
          LEFT JOIN users u ON u.id = py.received_by
-         ${where}
-         ORDER BY py.paid_at DESC LIMIT $1 OFFSET $2`, params),
-            (0, database_1.query)(`SELECT COUNT(*) FROM payments py ${where}`, conditions.length ? params.slice(2) : []),
+         ${mainWhere}
+         ORDER BY py.paid_at DESC LIMIT $1 OFFSET $2`, mainParams),
+            (0, database_1.query)(`SELECT COUNT(*) FROM payments py ${countWhere}`, countParams),
         ]);
         const total = parseInt(countRes.rows[0].count, 10);
         res.json({ success: true, data: dataRes.rows, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } });

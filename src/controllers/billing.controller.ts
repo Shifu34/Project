@@ -69,14 +69,28 @@ export const getPayments = async (req: Request, res: Response, next: NextFunctio
     const status    = req.query.status    as string | undefined;
     const offset    = (page - 1) * limit;
 
-    const conditions: string[] = [];
-    const params: unknown[] = [limit, offset];
-    let idx = 3;
+    const mainParams: unknown[] = [limit, offset];
+    const countParams: unknown[] = [];
+    const mainConditions: string[] = [];
+    const countConditions: string[] = [];
+    let mainIdx = 3;
+    let countIdx = 1;
 
-    if (patientId) { conditions.push(`py.patient_id = $${idx++}`); params.push(patientId); }
-    if (status)    { conditions.push(`py.payment_status = $${idx++}`); params.push(status); }
+    if (patientId) {
+      mainConditions.push(`py.patient_id = $${mainIdx++}`);
+      countConditions.push(`py.patient_id = $${countIdx++}`);
+      mainParams.push(patientId);
+      countParams.push(patientId);
+    }
+    if (status) {
+      mainConditions.push(`py.payment_status = $${mainIdx++}`);
+      countConditions.push(`py.payment_status = $${countIdx++}`);
+      mainParams.push(status);
+      countParams.push(status);
+    }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const mainWhere  = mainConditions.length  ? `WHERE ${mainConditions.join(' AND ')}`  : '';
+    const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
 
     const [dataRes, countRes] = await Promise.all([
       query(
@@ -86,11 +100,11 @@ export const getPayments = async (req: Request, res: Response, next: NextFunctio
          FROM payments py
          JOIN patients p ON p.id = py.patient_id
          LEFT JOIN users u ON u.id = py.received_by
-         ${where}
+         ${mainWhere}
          ORDER BY py.paid_at DESC LIMIT $1 OFFSET $2`,
-        params,
+        mainParams,
       ),
-      query(`SELECT COUNT(*) FROM payments py ${where}`, conditions.length ? params.slice(2) : []),
+      query(`SELECT COUNT(*) FROM payments py ${countWhere}`, countParams),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
