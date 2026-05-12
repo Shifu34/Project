@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import * as authCtrl from '../controllers/auth.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, authorize } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 
 const router = Router();
@@ -81,6 +81,17 @@ router.post('/verify-registration-code',
   body('code').isLength({ min: 6, max: 6 }).withMessage('Code must be 6 digits'),
   validate,
   authCtrl.verifyRegistrationOtp,
+);
+
+// Admin registers a lab staff member
+router.post('/register-lab-staff',
+  authenticate,
+  authorize('admin'),
+  body('name').notEmpty().trim().withMessage('name is required'),
+  body('email').isEmail().withMessage('A valid email is required'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  validate,
+  authCtrl.registerLabStaff,
 );
 
 export default router;

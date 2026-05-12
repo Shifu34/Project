@@ -454,6 +454,60 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
   }
 };
 
+// POST /auth/register-lab-staff  (Admin only)
+export const registerLabStaff = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { name, phone, email, password, organization_id } = req.body;
+
+    const dup = await query(`SELECT id FROM users WHERE email = $1`, [email]);
+    if (dup.rows.length > 0) {
+      res.status(409).json({ success: false, message: 'Email is already registered' });
+      return;
+    }
+
+    const hash = await bcrypt.hash(password, 12);
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const roleRes = await client.query(`SELECT id FROM roles WHERE name = 'lab_staff' LIMIT 1`);
+      if (roleRes.rows.length === 0) {
+        res.status(500).json({ success: false, message: "Role 'lab_staff' not found. Run migration 006 first." });
+        await client.query('ROLLBACK');
+        return;
+      }
+      const roleId = roleRes.rows[0].id;
+
+      // Split name into first/last (best-effort)
+      const [first_name, ...rest] = name.trim().split(' ');
+      const last_name = rest.join(' ') || '';
+
+      const userRes = await client.query(
+        `INSERT INTO users (role_id, first_name, last_name, email, password_hash, phone, organization_id, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING id`,
+        [roleId, first_name, last_name, email, hash, phone ?? null, organization_id ?? null],
+      );
+      const newUserId = userRes.rows[0].id;
+
+      await client.query(
+        `INSERT INTO lab_staff_profiles (user_id, name, phone, email, organization_id)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [newUserId, name, phone ?? null, email, organization_id ?? null],
+      );
+
+      await client.query('COMMIT');
+      res.status(201).json({ success: true, message: 'Lab staff registered successfully' });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    next(err);
+  }
+};
+
 // POST /auth/verify-registration-code
 export const verifyRegistrationOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
