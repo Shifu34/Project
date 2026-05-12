@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const express_validator_1 = require("express-validator");
 const labCtrl = __importStar(require("../controllers/lab.controller"));
+const labStaffCtrl = __importStar(require("../controllers/lab-staff.controller"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const validate_middleware_1 = require("../middleware/validate.middleware");
 const router = (0, express_1.Router)();
@@ -47,5 +48,18 @@ router.get('/orders/:id', labCtrl.getLabOrderById);
 router.post('/orders', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('encounter_id').isInt(), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('test_ids').isArray({ min: 1 }), validate_middleware_1.validate, labCtrl.createLabOrder);
 router.post('/order-items/:id/result', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('result_value').notEmpty(), validate_middleware_1.validate, labCtrl.enterLabResult);
 router.patch('/order-items/:id/verify', (0, auth_middleware_1.authorize)('admin', 'doctor'), labCtrl.verifyLabResult);
+// ---------------------------------------------------------------------------
+// Lab slots
+// ---------------------------------------------------------------------------
+router.get('/slots', (0, auth_middleware_1.authorize)('admin', 'lab_staff', 'patient'), labStaffCtrl.getLabSlots);
+router.post('/slots', (0, auth_middleware_1.authorize)('lab_staff'), (0, express_validator_1.body)('slot_date').isISO8601().withMessage('slot_date must be YYYY-MM-DD'), (0, express_validator_1.body)('slot_time').notEmpty().withMessage('slot_time is required'), (0, express_validator_1.body)('duration_minutes').optional().isInt({ min: 1 }), (0, express_validator_1.body)('max_bookings').optional().isInt({ min: 1 }), validate_middleware_1.validate, labStaffCtrl.createLabSlot);
+router.put('/slots/:id', (0, auth_middleware_1.authorize)('lab_staff'), (0, express_validator_1.body)('slot_date').optional().isISO8601(), (0, express_validator_1.body)('duration_minutes').optional().isInt({ min: 1 }), (0, express_validator_1.body)('max_bookings').optional().isInt({ min: 1 }), validate_middleware_1.validate, labStaffCtrl.updateLabSlot);
+router.delete('/slots/:id', (0, auth_middleware_1.authorize)('lab_staff'), labStaffCtrl.deleteLabSlot);
+// ---------------------------------------------------------------------------
+// Lab appointments
+// ---------------------------------------------------------------------------
+router.get('/appointments', (0, auth_middleware_1.authorize)('admin', 'lab_staff', 'patient'), labStaffCtrl.getLabAppointments);
+router.post('/appointments', (0, auth_middleware_1.authorize)('patient'), (0, express_validator_1.body)('lab_slot_id').isInt().withMessage('lab_slot_id is required'), validate_middleware_1.validate, labStaffCtrl.bookLabAppointment);
+router.patch('/appointments/:id', (0, auth_middleware_1.authorize)('admin', 'lab_staff'), (0, express_validator_1.body)('status').optional().isIn(['pending', 'confirmed', 'completed', 'cancelled']), validate_middleware_1.validate, labStaffCtrl.updateLabAppointment);
 exports.default = router;
 //# sourceMappingURL=lab.routes.js.map

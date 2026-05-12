@@ -51,5 +51,7 @@ router.post('/verify-reset-code', (0, express_validator_1.body)('email').isEmail
 router.post('/reset-password', (0, express_validator_1.body)('email').isEmail(), (0, express_validator_1.body)('code').isLength({ min: 6, max: 6 }).withMessage('Code must be 6 digits'), (0, express_validator_1.body)('new_password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'), validate_middleware_1.validate, authCtrl.resetPassword);
 router.post('/send-registration-code', (0, express_validator_1.body)('email').isEmail().withMessage('A valid email is required'), validate_middleware_1.validate, authCtrl.sendRegistrationOtp);
 router.post('/verify-registration-code', (0, express_validator_1.body)('email').isEmail().withMessage('A valid email is required'), (0, express_validator_1.body)('code').isLength({ min: 6, max: 6 }).withMessage('Code must be 6 digits'), validate_middleware_1.validate, authCtrl.verifyRegistrationOtp);
+// Admin registers a lab staff member
+router.post('/register-lab-staff', auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('name').notEmpty().trim().withMessage('name is required'), (0, express_validator_1.body)('email').isEmail().withMessage('A valid email is required'), (0, express_validator_1.body)('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'), validate_middleware_1.validate, authCtrl.registerLabStaff);
 exports.default = router;
 //# sourceMappingURL=auth.routes.js.map

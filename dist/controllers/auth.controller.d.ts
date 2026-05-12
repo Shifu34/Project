@@ -9,5 +9,6 @@ export declare const resendResetCode: (req: Request, res: Response, next: NextFu
 export declare const verifyResetCode: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const resetPassword: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const sendRegistrationOtp: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const registerLabStaff: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 export declare const verifyRegistrationOtp: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 //# sourceMappingURL=auth.controller.d.ts.map
