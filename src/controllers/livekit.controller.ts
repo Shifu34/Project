@@ -17,24 +17,33 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
     const intent       = (req.body?.intent as string) ?? null;
     const appointmentId = req.body?.appointment_id ? Number(req.body.appointment_id) : null;
 
-    const isDoctor  = roleName === 'doctor';
-    const isAdmin   = roleName === 'admin' || roleName === 'super_admin';
+    const isDoctor   = roleName === 'doctor';
+    const isAdmin    = roleName === 'admin' || roleName === 'super_admin';
+    const isLabStaff = roleName === 'lab_staff';
 
     let identity: string;
     let agentName: string;
+    let roomPrefix: string;
 
     if (isAdmin) {
-      identity  = `admin-${userId}`;
-      agentName = 'murshid-admin-agent';
+      identity   = `admin-${userId}`;
+      agentName  = 'murshid-admin-agent';
+      roomPrefix = 'admin';
     } else if (isDoctor) {
-      identity  = `doctor-${userId}`;
-      agentName = 'murshid-doctor-agent';
+      identity   = `doctor-${userId}`;
+      agentName  = 'murshid-doctor-agent';
+      roomPrefix = 'voice';
+    } else if (isLabStaff) {
+      identity   = `lab-${userId}`;
+      agentName  = 'murshid-lab-agent';
+      roomPrefix = 'lab';
     } else {
-      identity  = `patient-${userId}`;
-      agentName = 'murshid-hospital-agent';
+      identity   = `patient-${userId}`;
+      agentName  = 'murshid-hospital-agent';
+      roomPrefix = 'voice';
     }
 
-    const roomName = `${isAdmin ? 'admin' : 'voice'}-${userId}-${Math.floor(Date.now() / 1000)}`;
+    const roomName = `${roomPrefix}-${userId}-${Math.floor(Date.now() / 1000)}`;
 
     // Metadata passed to both the participant token and agent dispatch.
     // Agent code reads token (for auth), role (for routing), intent (for sub-agent routing),
