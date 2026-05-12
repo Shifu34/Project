@@ -2,6 +2,32 @@ import { Response, NextFunction } from 'express';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 
+// Helper: insert test associations into lab_slot_tests
+async function setSlotTests(client: Awaited<ReturnType<typeof getClient>>, slotId: number, testIds: number[]): Promise<void> {
+  await client.query(`DELETE FROM lab_slot_tests WHERE lab_slot_id = $1`, [slotId]);
+  for (const tid of testIds) {
+    await client.query(`INSERT INTO lab_slot_tests (lab_slot_id, lab_test_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [slotId, tid]);
+  }
+}
+
+// Helper: attach test names array to slot rows
+async function attachSlotTests(rows: any[]): Promise<any[]> {
+  if (rows.length === 0) return rows;
+  const ids = rows.map((r) => r.id);
+  const res = await query(
+    `SELECT lst.lab_slot_id, ltc.id AS test_id, ltc.name AS test_name
+     FROM lab_slot_tests lst
+     JOIN lab_test_catalog ltc ON ltc.id = lst.lab_test_id
+     WHERE lst.lab_slot_id = ANY($1)`,
+    [ids],
+  );
+  const map: Record<number, { id: number; name: string }[]> = {};
+  for (const r of res.rows) {
+    (map[r.lab_slot_id] ??= []).push({ id: r.test_id, name: r.test_name });
+  }
+  return rows.map((r) => ({ ...r, tests: map[r.id] ?? [] }));
+}
+
 // ---------------------------------------------------------------------------
 // Helper: resolve lab_staff_profiles row from user_id
 // ---------------------------------------------------------------------------
@@ -27,52 +53,49 @@ export const getLabSlots = async (req: AuthRequest, res: Response, next: NextFun
       const staff = await resolveLabStaff(userId);
       if (!staff) { res.status(404).json({ success: false, message: 'Lab staff profile not found' }); return; }
       const result = await query(
-        `SELECT ls.*, lsp.name AS staff_name, ltc.name AS test_name, o.name AS organization_name
+        `SELECT ls.*, lsp.name AS staff_name, o.name AS organization_name
          FROM lab_slots ls
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
-         LEFT JOIN lab_test_catalog ltc ON ltc.id = ls.test_id
          LEFT JOIN organizations o ON o.id = ls.organization_id
          WHERE ls.lab_staff_id = $1
          ORDER BY ls.slot_date, ls.slot_time`,
         [staff.id],
       );
-      rows = result.rows;
+      rows = await attachSlotTests(result.rows);
     } else if (roleName === 'patient') {
       const params: unknown[] = [];
       let orgWhere = '';
       if (orgFilter) { params.push(orgFilter); orgWhere = `AND ls.organization_id = $${params.length}`; }
       const result = await query(
-        `SELECT ls.*, lsp.name AS staff_name, ltc.name AS test_name, o.name AS organization_name,
+        `SELECT ls.*, lsp.name AS staff_name, o.name AS organization_name,
                 (ls.max_bookings - COUNT(la.id)) AS remaining_bookings
          FROM lab_slots ls
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
-         LEFT JOIN lab_test_catalog ltc ON ltc.id = ls.test_id
          LEFT JOIN organizations o ON o.id = ls.organization_id
          LEFT JOIN lab_appointments la
            ON la.lab_slot_id = ls.id AND la.status NOT IN ('cancelled')
          WHERE ls.is_active = true AND ls.slot_date >= CURRENT_DATE ${orgWhere}
-         GROUP BY ls.id, lsp.name, ltc.name, o.name
+         GROUP BY ls.id, lsp.name, o.name
          HAVING (ls.max_bookings - COUNT(la.id)) > 0
          ORDER BY ls.slot_date, ls.slot_time`,
         params,
       );
-      rows = result.rows;
+      rows = await attachSlotTests(result.rows);
     } else {
       // admin: all slots, optional org filter
       const params: unknown[] = [];
       let orgWhere = '';
       if (orgFilter) { params.push(orgFilter); orgWhere = `WHERE ls.organization_id = $${params.length}`; }
       const result = await query(
-        `SELECT ls.*, lsp.name AS staff_name, ltc.name AS test_name, o.name AS organization_name
+        `SELECT ls.*, lsp.name AS staff_name, o.name AS organization_name
          FROM lab_slots ls
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
-         LEFT JOIN lab_test_catalog ltc ON ltc.id = ls.test_id
          LEFT JOIN organizations o ON o.id = ls.organization_id
          ${orgWhere}
          ORDER BY ls.slot_date DESC, ls.slot_time`,
         params,
       );
-      rows = result.rows;
+      rows = await attachSlotTests(result.rows);
     }
 
     res.json({ success: true, data: rows });
@@ -85,24 +108,34 @@ export const getLabSlots = async (req: AuthRequest, res: Response, next: NextFun
 // POST /lab/slots  (lab_staff only)
 // ---------------------------------------------------------------------------
 export const createLabSlot = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  const client = await getClient();
   try {
+    await client.query('BEGIN');
     const { userId } = req.user!;
     const staff = await resolveLabStaff(userId);
-    if (!staff) { res.status(404).json({ success: false, message: 'Lab staff profile not found' }); return; }
+    if (!staff) { await client.query('ROLLBACK'); res.status(404).json({ success: false, message: 'Lab staff profile not found' }); return; }
 
-    const { test_id, slot_date, slot_time, duration_minutes, max_bookings, organization_id } = req.body;
-    // Use explicitly provided org, fall back to the staff member's own org (may be null)
+    const { test_ids, slot_date, slot_time, duration_minutes, max_bookings, organization_id } = req.body;
     const resolvedOrgId = organization_id ?? staff.organization_id ?? null;
+    const ids: number[] = Array.isArray(test_ids) ? test_ids.map(Number) : [];
 
-    const result = await query(
-      `INSERT INTO lab_slots (lab_staff_id, test_id, slot_date, slot_time, duration_minutes, max_bookings, organization_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [staff.id, test_id ?? null, slot_date, slot_time, duration_minutes ?? 15, max_bookings ?? 1, resolvedOrgId],
+    const result = await client.query(
+      `INSERT INTO lab_slots (lab_staff_id, slot_date, slot_time, duration_minutes, max_bookings, organization_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [staff.id, slot_date, slot_time, duration_minutes ?? 15, max_bookings ?? 1, resolvedOrgId],
     );
+    const slot = result.rows[0];
 
-    res.status(201).json({ success: true, data: result.rows[0] });
+    if (ids.length > 0) await setSlotTests(client, slot.id, ids);
+
+    await client.query('COMMIT');
+    const [withTests] = await attachSlotTests([slot]);
+    res.status(201).json({ success: true, data: withTests });
   } catch (err) {
+    await client.query('ROLLBACK');
     next(err);
+  } finally {
+    client.release();
   }
 };
 
@@ -116,30 +149,46 @@ export const updateLabSlot = async (req: AuthRequest, res: Response, next: NextF
     if (!staff) { res.status(404).json({ success: false, message: 'Lab staff profile not found' }); return; }
 
     const slotId = Number(req.params.id);
-    const { test_id, slot_date, slot_time, duration_minutes, max_bookings, is_active, organization_id } = req.body;
+    const { test_ids, slot_date, slot_time, duration_minutes, max_bookings, is_active, organization_id } = req.body;
 
-    const result = await query(
-      `UPDATE lab_slots
-       SET test_id          = COALESCE($1, test_id),
-           slot_date        = COALESCE($2, slot_date),
-           slot_time        = COALESCE($3, slot_time),
-           duration_minutes = COALESCE($4, duration_minutes),
-           max_bookings     = COALESCE($5, max_bookings),
-           is_active        = COALESCE($6, is_active),
-           organization_id  = COALESCE($7, organization_id)
-       WHERE id = $8 AND lab_staff_id = $9
-       RETURNING *`,
-      [test_id ?? null, slot_date ?? null, slot_time ?? null,
-       duration_minutes ?? null, max_bookings ?? null, is_active ?? null,
-       organization_id ?? null, slotId, staff.id],
-    );
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
 
-    if (result.rows.length === 0) {
-      res.status(404).json({ success: false, message: 'Slot not found or access denied' });
-      return;
+      const result = await client.query(
+        `UPDATE lab_slots
+         SET slot_date        = COALESCE($1, slot_date),
+             slot_time        = COALESCE($2, slot_time),
+             duration_minutes = COALESCE($3, duration_minutes),
+             max_bookings     = COALESCE($4, max_bookings),
+             is_active        = COALESCE($5, is_active),
+             organization_id  = COALESCE($6, organization_id)
+         WHERE id = $7 AND lab_staff_id = $8
+         RETURNING *`,
+        [slot_date ?? null, slot_time ?? null,
+         duration_minutes ?? null, max_bookings ?? null, is_active ?? null,
+         organization_id ?? null, slotId, staff.id],
+      );
+
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ success: false, message: 'Slot not found or access denied' });
+        return;
+      }
+
+      if (Array.isArray(test_ids)) {
+        await setSlotTests(client, slotId, test_ids.map(Number));
+      }
+
+      await client.query('COMMIT');
+      const [withTests] = await attachSlotTests([result.rows[0]]);
+      res.json({ success: true, data: withTests });
+    } catch (innerErr) {
+      await client.query('ROLLBACK');
+      throw innerErr;
+    } finally {
+      client.release();
     }
-
-    res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     next(err);
   }
