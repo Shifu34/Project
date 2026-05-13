@@ -1,18 +1,25 @@
 import { Request, Response, NextFunction } from 'express';
 import { query, getClient } from '../config/database';
 
-// GET /lab/tests?search=  – single global search across name, code, category, description
+// GET /lab/tests?search=&organization_id=
 export const getLabTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const search = (req.query.search as string || '').trim();
+    const orgId  = req.query.organization_id ? Number(req.query.organization_id) : null;
 
     const params: unknown[] = [];
-    let where = `WHERE is_active = TRUE`;
+    const conditions: string[] = ['is_active = TRUE'];
 
     if (search) {
       params.push(`%${search}%`);
-      where += ` AND (name ILIKE $1 OR code ILIKE $1 OR category ILIKE $1 OR description ILIKE $1)`;
+      conditions.push(`(name ILIKE $${params.length} OR code ILIKE $${params.length} OR category ILIKE $${params.length} OR description ILIKE $${params.length})`);
     }
+    if (orgId !== null) {
+      params.push(orgId);
+      conditions.push(`organization_id = $${params.length}`);
+    }
+
+    const where = `WHERE ${conditions.join(' AND ')}`;
 
     const result = await query(
       `SELECT * FROM lab_test_catalog ${where} ORDER BY category, name`,
@@ -24,18 +31,25 @@ export const getLabTests = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-// GET /lab/radiology-tests?search=  – single global search across name, code, modality, description
+// GET /lab/radiology-tests?search=&organization_id=
 export const getRadiologyTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const search = (req.query.search as string || '').trim();
+    const orgId  = req.query.organization_id ? Number(req.query.organization_id) : null;
 
     const params: unknown[] = [];
-    let where = `WHERE is_active = TRUE`;
+    const conditions: string[] = ['is_active = TRUE'];
 
     if (search) {
       params.push(`%${search}%`);
-      where += ` AND (name ILIKE $1 OR code ILIKE $1 OR modality ILIKE $1 OR description ILIKE $1)`;
+      conditions.push(`(name ILIKE $${params.length} OR code ILIKE $${params.length} OR modality ILIKE $${params.length} OR description ILIKE $${params.length})`);
     }
+    if (orgId !== null) {
+      params.push(orgId);
+      conditions.push(`organization_id = $${params.length}`);
+    }
+
+    const where = `WHERE ${conditions.join(' AND ')}`;
 
     const result = await query(
       `SELECT * FROM radiology_test_catalog ${where} ORDER BY modality, name`,

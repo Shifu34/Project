@@ -48,7 +48,7 @@ export const getOrganizationById = async (req: Request, res: Response, next: Nex
 // Body: { name, slug?, address?, phone?, email?, admin_first_name, admin_last_name, admin_email, admin_password? }
 export const createOrganization = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const {
-    name, slug, address, phone, email,
+    name, slug, address, phone, email, category,
     admin_first_name, admin_last_name, admin_email, admin_password,
   } = req.body;
 
@@ -58,10 +58,10 @@ export const createOrganization = async (req: Request, res: Response, next: Next
 
     // Create the organization
     const orgRes = await client.query(
-      `INSERT INTO organizations (name, slug, address, phone, email, is_active, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, true, NOW(), NOW())
+      `INSERT INTO organizations (name, slug, address, phone, email, category, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
        RETURNING *`,
-      [name, slug ?? null, address ?? null, phone ?? null, email ?? null],
+      [name, slug ?? null, address ?? null, phone ?? null, email ?? null, category ?? null],
     );
     const org = orgRes.rows[0];
 
@@ -94,7 +94,7 @@ export const createOrganization = async (req: Request, res: Response, next: Next
 // PUT /organizations/:id  — super_admin only
 export const updateOrganization = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, slug, address, phone, email, is_active } = req.body;
+    const { name, slug, address, phone, email, is_active, category } = req.body;
     const result = await query(
       `UPDATE organizations SET
          name       = COALESCE($1, name),
@@ -103,10 +103,11 @@ export const updateOrganization = async (req: Request, res: Response, next: Next
          phone      = COALESCE($4, phone),
          email      = COALESCE($5, email),
          is_active  = COALESCE($6, is_active),
+         category   = COALESCE($7, category),
          updated_at = NOW()
-       WHERE id = $7
+       WHERE id = $8
        RETURNING *`,
-      [name ?? null, slug ?? null, address ?? null, phone ?? null, email ?? null, is_active ?? null, req.params.id],
+      [name ?? null, slug ?? null, address ?? null, phone ?? null, email ?? null, is_active ?? null, category ?? null, req.params.id],
     );
     if (result.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Organization not found' });
@@ -129,8 +130,20 @@ export const getOrganizationStats = async (req: Request, res: Response, next: Ne
            COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress,
            COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
            COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
-           COUNT(*)                                        AS total
-         FROM appointments WHERE organization_id = $1`,
+           COUNT(*)                                        AS total,
+           COUNT(*) FILTER (
+             WHERE EXISTS (
+               SELECT 1 FROM payments p
+               WHERE p.appointment_id = a.id AND p.payment_status = 'completed'
+             )
+           ) AS paid,
+           COUNT(*) FILTER (
+             WHERE status NOT IN ('cancelled') AND NOT EXISTS (
+               SELECT 1 FROM payments p
+               WHERE p.appointment_id = a.id AND p.payment_status = 'completed'
+             )
+           ) AS unpaid
+         FROM appointments a WHERE organization_id = $1`,
         [orgId],
       ),
       query('SELECT COUNT(*) AS total FROM patients WHERE organization_id = $1', [orgId]),
