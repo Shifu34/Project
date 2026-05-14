@@ -254,7 +254,10 @@ export const processPayment = async (req: AuthRequest, res: Response, next: Next
 
     // Verify appointment exists and belongs to this patient
     const apptRes = await query(
-      `SELECT id, status, patient_id FROM appointments WHERE id = $1 LIMIT 1`,
+      `SELECT a.id, a.status, a.patient_id, COALESCE(d.consultation_fee, 0) AS consultation_fee
+       FROM appointments a
+       JOIN doctors d ON d.id = a.doctor_id
+       WHERE a.id = $1 LIMIT 1`,
       [appointment_id],
     );
     if (apptRes.rows.length === 0) {
@@ -295,10 +298,11 @@ export const processPayment = async (req: AuthRequest, res: Response, next: Next
         `INSERT INTO payments
            (appointment_id, patient_id, amount, payment_method, transaction_reference,
             payment_status, notes)
-         VALUES ($1, $2, 0, $3, $4, 'completed', $5) RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, 'completed', $6) RETURNING *`,
         [
           appointment_id,
           patientId,
+          appointment.consultation_fee,
           dbMethod,
           mockTransactionId,
           `Demo payment via ${payment_method}`,
