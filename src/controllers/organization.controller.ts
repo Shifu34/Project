@@ -127,21 +127,16 @@ export const getOrganizationStats = async (req: Request, res: Response, next: Ne
       query(
         `SELECT
            COUNT(*) FILTER (WHERE status = 'scheduled')       AS scheduled,
+           COUNT(*) FILTER (WHERE status = 'confirmed')       AS confirmed,
+           COUNT(*) FILTER (WHERE status = 'pending')         AS pending,
            COUNT(*) FILTER (WHERE status = 'in_progress')     AS in_progress,
            COUNT(*) FILTER (WHERE status = 'completed')       AS completed,
            COUNT(*) FILTER (WHERE status = 'cancelled')       AS cancelled,
+           COUNT(*) FILTER (WHERE status = 'no_show')         AS no_show,
            COUNT(*) FILTER (WHERE status = 'payment_timeout') AS payment_timeout,
-           COUNT(*)                                            AS total,
-           COUNT(*) FILTER (
-             WHERE status IN ('confirmed','pending','completed')
-               AND EXISTS (
-                 SELECT 1 FROM payments p
-                 WHERE p.appointment_id = a.id AND p.payment_status = 'completed'
-               )
-           ) AS paid,
-           COUNT(*) FILTER (
-             WHERE status = 'payment_timeout'
-           ) AS unpaid
+           COUNT(*) FILTER (WHERE status != 'payment_timeout') AS total,
+           COUNT(*) FILTER (WHERE status IN ('confirmed','pending','completed')) AS paid,
+           COUNT(*) FILTER (WHERE status = 'payment_timeout')                  AS unpaid
          FROM appointments a WHERE organization_id = $1`,
         [orgId],
       ),
