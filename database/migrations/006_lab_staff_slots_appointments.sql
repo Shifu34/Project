@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS lab_staff_profiles (
   name             VARCHAR(255) NOT NULL,
   phone            VARCHAR(50),
   email            VARCHAR(255),
-  organization_id  INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
+  organization_id  INTEGER REFERENCES organizations(id) ON DELETE SET NULL DEFAULT 1,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (user_id)
 );

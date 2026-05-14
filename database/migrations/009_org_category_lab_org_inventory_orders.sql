@@ -9,7 +9,7 @@ ALTER TABLE organizations
 -- 2. Link organization_id into lab_orders
 --    (lab_slots/lab_appointments already have it from migration 007)
 ALTER TABLE lab_orders
-  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL DEFAULT 1;
 
 -- Backfill: infer from the ordering doctor's organization
 UPDATE lab_orders lo
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS inventory_orders (
   id                SERIAL PRIMARY KEY,
   patient_id        INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   inventory_item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
-  organization_id   INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
+  organization_id   INTEGER REFERENCES organizations(id) ON DELETE SET NULL DEFAULT 1,
   quantity          INTEGER NOT NULL CHECK (quantity > 0),
   unit_price        DECIMAL(10,2) NOT NULL CHECK (unit_price >= 0),
   total_amount      DECIMAL(12,2) NOT NULL,          -- stored: quantity * unit_price

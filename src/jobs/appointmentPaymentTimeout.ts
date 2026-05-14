@@ -49,15 +49,18 @@ export function startPaymentTimeoutJob(): void {
       const ids: number[] = staleResult.rows.map((r: { id: number }) => r.id);
 
       logger.warn(
-        `[PaymentTimeoutJob] Deleting ${ids.length} unpaid appointment(s): [${ids.join(', ')}]`,
+        `[PaymentTimeoutJob] Marking ${ids.length} unpaid appointment(s) as payment_timeout: [${ids.join(', ')}]`,
       );
 
       await query(
-        `DELETE FROM appointments WHERE id = ANY($1::int[])`,
+        `UPDATE appointments
+         SET status     = 'payment_timeout',
+             updated_at = NOW()
+         WHERE id = ANY($1::int[])`,
         [ids],
       );
 
-      logger.info(`[PaymentTimeoutJob] Successfully deleted ${ids.length} appointment(s).`);
+      logger.info(`[PaymentTimeoutJob] Successfully marked ${ids.length} appointment(s) as payment_timeout.`);
     } catch (err) {
       logger.error('[PaymentTimeoutJob] Error during scheduled run', err);
     }

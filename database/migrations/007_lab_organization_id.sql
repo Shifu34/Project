@@ -1,10 +1,10 @@
 -- Migration 007: Add organization_id to lab_slots and lab_appointments
 
 ALTER TABLE lab_slots
-  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL DEFAULT 1;
 
 ALTER TABLE lab_appointments
-  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL DEFAULT 1;
 
 -- Backfill slots: inherit from the staff member's profile
 UPDATE lab_slots ls

@@ -126,22 +126,21 @@ export const getOrganizationStats = async (req: Request, res: Response, next: Ne
     const [appts, patients, doctors, payments] = await Promise.all([
       query(
         `SELECT
-           COUNT(*) FILTER (WHERE status = 'scheduled')   AS scheduled,
-           COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress,
-           COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
-           COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
-           COUNT(*)                                        AS total,
+           COUNT(*) FILTER (WHERE status = 'scheduled')       AS scheduled,
+           COUNT(*) FILTER (WHERE status = 'in_progress')     AS in_progress,
+           COUNT(*) FILTER (WHERE status = 'completed')       AS completed,
+           COUNT(*) FILTER (WHERE status = 'cancelled')       AS cancelled,
+           COUNT(*) FILTER (WHERE status = 'payment_timeout') AS payment_timeout,
+           COUNT(*)                                            AS total,
            COUNT(*) FILTER (
-             WHERE EXISTS (
-               SELECT 1 FROM payments p
-               WHERE p.appointment_id = a.id AND p.payment_status = 'completed'
-             )
+             WHERE status IN ('confirmed','pending','completed')
+               AND EXISTS (
+                 SELECT 1 FROM payments p
+                 WHERE p.appointment_id = a.id AND p.payment_status = 'completed'
+               )
            ) AS paid,
            COUNT(*) FILTER (
-             WHERE status NOT IN ('cancelled') AND NOT EXISTS (
-               SELECT 1 FROM payments p
-               WHERE p.appointment_id = a.id AND p.payment_status = 'completed'
-             )
+             WHERE status = 'payment_timeout'
            ) AS unpaid
          FROM appointments a WHERE organization_id = $1`,
         [orgId],
@@ -149,10 +148,10 @@ export const getOrganizationStats = async (req: Request, res: Response, next: Ne
       query('SELECT COUNT(*) AS total FROM patients WHERE organization_id = $1', [orgId]),
       query('SELECT COUNT(*) AS total FROM doctors  WHERE organization_id = $1', [orgId]),
       query(
-        `SELECT COALESCE(SUM(py.amount_paid), 0) AS total_revenue
+        `SELECT COALESCE(SUM(py.amount), 0) AS total_revenue
          FROM payments py
          JOIN appointments a ON a.id = py.appointment_id
-         WHERE a.organization_id = $1 AND py.payment_status = 'paid'`,
+         WHERE a.organization_id = $1 AND py.payment_status = 'completed'`,
         [orgId],
       ),
     ]);

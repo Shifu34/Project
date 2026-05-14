@@ -38,6 +38,10 @@ export const getAppointments = async (req: Request, res: Response, next: NextFun
       countConditions.push(`a.status = $${countIdx++}`);
       mainParams.push(status);
       countParams.push(status);
+    } else {
+      // Always hide payment_timeout rows from normal listing
+      mainConditions.push(`a.status != 'payment_timeout'`);
+      countConditions.push(`a.status != 'payment_timeout'`);
     }
 
     const mainWhere  = mainConditions.length  ? `WHERE ${mainConditions.join(' AND ')}`  : '';
@@ -129,13 +133,20 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
       return;
     }
 
+    // Resolve organization_id from the doctor's linked user
+    const docOrgRes = await query(
+      `SELECT u.organization_id FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = $1 LIMIT 1`,
+      [doctor_id],
+    );
+    const orgId = docOrgRes.rows[0]?.organization_id ?? 1;
+
     const result = await query(
       `INSERT INTO appointments
          (patient_id, doctor_id, department_id, appointment_date, appointment_time,
-          duration_minutes, appointment_type, nature_of_visit_id, reason, notes, booked_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          duration_minutes, appointment_type, nature_of_visit_id, reason, notes, booked_by, organization_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [patient_id, doctor_id, department_id, appointment_date, appointment_time,
-       duration_minutes || 30, appointment_type || 'Online Consultation', resolvedNatureId, reason, notes, bookedBy],
+       duration_minutes || 30, appointment_type || 'Online Consultation', resolvedNatureId, reason, notes, bookedBy, orgId],
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });

@@ -2,10 +2,10 @@
 -- (inventory_items already has organization_id from the base schema)
 
 ALTER TABLE lab_test_catalog
-  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL DEFAULT 1;
 
 ALTER TABLE radiology_test_catalog
-  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL DEFAULT 1;
 
 CREATE INDEX IF NOT EXISTS idx_lab_test_catalog_org  ON lab_test_catalog (organization_id);
 CREATE INDEX IF NOT EXISTS idx_radio_test_catalog_org ON radiology_test_catalog (organization_id);
