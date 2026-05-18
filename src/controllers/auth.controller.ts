@@ -143,9 +143,13 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 
     // Fetch doctor_id if the user is a doctor
     let doctorId: number | null = null;
+    let doctorBranchId: number | null = null;
     if (user.role_name === 'doctor') {
-      const doctorRes = await query(`SELECT employee_id AS id FROM doctors WHERE user_id = $1 LIMIT 1`, [user.id]);
-      if (doctorRes.rows.length > 0) doctorId = doctorRes.rows[0].id;
+      const doctorRes = await query(`SELECT employee_id AS id, branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [user.id]);
+      if (doctorRes.rows.length > 0) {
+        doctorId = doctorRes.rows[0].id;
+        doctorBranchId = doctorRes.rows[0].branch_id;
+      }
     }
 
     const payload = {
@@ -176,7 +180,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           date_of_birth: patientData.date_of_birth ?? null,
           organization_id: user.organization_id ?? null,
           organization_name: user.organization_name ?? null,
-          ...(doctorId !== null && { doctor_id: doctorId }),
+          ...(doctorId !== null && { doctor_id: doctorId, doctor_branch_id: doctorBranchId }),
           ...(patientData.id !== undefined && { patient_id: patientData.id }),
         },
       },
