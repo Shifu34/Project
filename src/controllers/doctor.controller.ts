@@ -528,8 +528,7 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
 
     if (doctorPairs.length > 0 && dayOfWeekList.length > 0) {
       const pairPlaceholders = doctorPairs.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
-      const schedParams = doctorPairs.flat();
-      schedParams.push(dayOfWeekList);
+      const schedParams: unknown[] = [...doctorPairs.flat(), dayOfWeekList];
       const dayParamIdx = schedParams.length;
 
       const schedRes = await query(
