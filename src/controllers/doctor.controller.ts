@@ -3,21 +3,31 @@ import bcrypt from 'bcryptjs';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 
-const canDoctorManageProfile = async (req: AuthRequest, doctorId: number): Promise<boolean> => {
+const getBranchIdFromRequest = (req: Request): number | null => {
+  const raw = (req.query.branch_id ?? req.body.branch_id ?? req.body.doctor_branch_id) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const canDoctorManageProfile = async (req: AuthRequest, doctorId: number, doctorBranchId: number): Promise<boolean> => {
   if (!req.user) return false;
   if (req.user.roleName === 'admin') return true;
   if (req.user.roleName !== 'doctor') return false;
 
-  const ownDoctor = await query(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [req.user.userId]);
+  const ownDoctor = await query(
+    `SELECT employee_id AS id, branch_id FROM doctors WHERE user_id = $1 LIMIT 1`,
+    [req.user.userId],
+  );
   if (ownDoctor.rows.length === 0) return false;
-  return Number(ownDoctor.rows[0].id) === doctorId;
+  return Number(ownDoctor.rows[0].id) === doctorId && Number(ownDoctor.rows[0].branch_id) === doctorBranchId;
 };
 
 // GET /doctors/stats/departments — department distribution for charts
 export const getDoctorDeptStats = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const result = await query(
-      `SELECT dept.name AS department, COUNT(d.id)::int AS count
+      `SELECT dept.name AS department, COUNT(d.employee_id)::int AS count
        FROM doctors d
        LEFT JOIN departments dept ON dept.id = d.department_id
        GROUP BY dept.name
@@ -50,7 +60,7 @@ export const getDoctors = async (req: Request, res: Response, next: NextFunction
 
     const [dataRes, countRes] = await Promise.all([
       query(
-        `SELECT d.id, d.user_id, d.specialization, d.license_number, d.qualification,
+        `SELECT d.employee_id AS id, d.branch_id, d.user_id, d.specialization, d.license_number, d.qualification,
                 d.experience_years, d.consultation_fee, d.is_active,
                 COALESCE(u.first_name, d.first_name) AS first_name,
                 COALESCE(u.last_name,  d.last_name)  AS last_name,
@@ -82,8 +92,14 @@ export const getDoctors = async (req: Request, res: Response, next: NextFunction
 // GET /doctors/:id
 export const getDoctorById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
     const result = await query(
-      `SELECT d.*,
+      `SELECT d.*, d.employee_id AS id,
               COALESCE(u.first_name, d.first_name) AS first_name,
               COALESCE(u.last_name,  d.last_name)  AS last_name,
               COALESCE(u.email,      d.email)       AS email,
@@ -93,8 +109,8 @@ export const getDoctorById = async (req: Request, res: Response, next: NextFunct
        FROM doctors d
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN departments dept ON dept.id = d.department_id
-       WHERE d.id = $1`,
-      [req.params.id],
+       WHERE d.employee_id = $1 AND d.branch_id = $2`,
+      [req.params.id, branchId],
     );
 
     if (result.rows.length === 0) {
@@ -112,7 +128,7 @@ export const getDoctorByUserId = async (req: Request, res: Response, next: NextF
   try {
     const userId = (req as Request & { user?: { userId: number } }).user?.userId;
     const result = await query(
-      `SELECT d.*,
+      `SELECT d.*, d.employee_id AS id,
               COALESCE(u.first_name, d.first_name) AS first_name,
               COALESCE(u.last_name,  d.last_name)  AS last_name,
               COALESCE(u.email,      d.email)       AS email,
@@ -142,7 +158,7 @@ export const createDoctor = async (req: Request, res: Response, next: NextFuncti
     const {
       first_name, last_name, email, password, phone, gender, date_of_birth, address,
       department_id, specialization, license_number, qualification,
-      experience_years, consultation_fee, bio,
+      experience_years, consultation_fee, bio, branch_id, account_status,
     } = req.body;
 
     const reqUser = (req as Request & { user?: { organizationId?: number } }).user;
@@ -161,16 +177,43 @@ export const createDoctor = async (req: Request, res: Response, next: NextFuncti
       );
       const userId = userRes.rows[0].id;
 
+      const bodyOrgId = (req.body.organization_id ?? null) as number | null;
+      let orgId = reqUser?.organizationId ?? bodyOrgId;
+      let branchId = branch_id ?? null;
+      if (!branchId && orgId) {
+        const branchRes = await client.query(
+          `SELECT id FROM branches WHERE organization_id = $1 AND branch_seq = 1 LIMIT 1`,
+          [orgId],
+        );
+        if (branchRes.rows.length > 0) branchId = branchRes.rows[0].id;
+      }
+      if (!orgId && branchId) {
+        const orgRes = await client.query(
+          `SELECT organization_id FROM branches WHERE id = $1 LIMIT 1`,
+          [branchId],
+        );
+        if (orgRes.rows.length > 0) orgId = orgRes.rows[0].organization_id;
+      }
+      if (!branchId) {
+        res.status(400).json({ success: false, message: 'branch_id or organization_id is required' });
+        return;
+      }
+      const status = account_status ?? 'unclaimed';
+
       const docRes = await client.query(
         `INSERT INTO doctors
-           (user_id, first_name, last_name, email, phone, gender, date_of_birth,
+           (user_id, organization_id, branch_id, account_status,
+            first_name, last_name, email, phone, gender, date_of_birth,
             department_id, specialization, license_number, qualification,
             experience_years, consultation_fee, bio)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          RETURNING *`,
-        [userId, first_name, last_name, email, phone, gender ?? null, date_of_birth ?? null,
-         department_id ?? null, specialization ?? null, license_number ?? null, qualification ?? null,
-         experience_years ?? null, consultation_fee ?? null, bio ?? null],
+        [
+          userId, orgId, branchId, status,
+          first_name, last_name, email, phone, gender ?? null, date_of_birth ?? null,
+          department_id ?? null, specialization ?? null, license_number ?? null, qualification ?? null,
+          experience_years ?? null, consultation_fee ?? null, bio ?? null,
+        ],
       );
 
       await client.query('COMMIT');
@@ -194,13 +237,19 @@ export const updateDoctor = async (req: Request, res: Response, next: NextFuncti
       experience_years, consultation_fee, bio,
     } = req.body;
 
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
     const result = await query(
       `UPDATE doctors
        SET department_id=$1, specialization=$2, license_number=$3, qualification=$4,
            experience_years=$5, consultation_fee=$6, bio=$7
-       WHERE id = $8 RETURNING *`,
+       WHERE employee_id = $8 AND branch_id = $9 RETURNING *`,
       [department_id, specialization, license_number, qualification,
-       experience_years, consultation_fee, bio, req.params.id],
+       experience_years, consultation_fee, bio, req.params.id, branchId],
     );
 
     if (result.rows.length === 0) {
@@ -217,15 +266,20 @@ export const updateDoctor = async (req: Request, res: Response, next: NextFuncti
 export const getDoctorAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
 
     const result = await query(
       `SELECT a.*, CONCAT(p.first_name,' ',p.last_name) AS patient_name,
               p.patient_code, p.phone AS patient_phone
        FROM appointments a
        JOIN patients p ON p.id = a.patient_id
-       WHERE a.doctor_id = $1 AND a.appointment_date = $2
+       WHERE a.doctor_id = $1 AND a.doctor_branch_id = $2 AND a.appointment_date = $3
        ORDER BY a.appointment_time ASC`,
-      [req.params.id, date],
+      [req.params.id, branchId, date],
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
@@ -272,8 +326,8 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
 
     const [dataRes, countRes] = await Promise.all([
       query(
-        `SELECT
-           d.id, d.specialization, d.qualification, d.experience_years,
+          `SELECT
+            d.employee_id AS id, d.branch_id, d.specialization, d.qualification, d.experience_years,
            d.consultation_fee, d.is_active,
            COALESCE(u.first_name, d.first_name) AS first_name,
            COALESCE(u.last_name,  d.last_name)  AS last_name,
@@ -293,22 +347,25 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
     ]);
 
     // Fetch all available schedules for matched doctors
-    const doctorIds: number[] = dataRes.rows.map((r: { id: number }) => r.id);
-    let scheduleMap: Record<number, unknown[]> = {};
+    const doctorPairs: Array<[number, number]> = dataRes.rows.map((r: { id: number; branch_id: number }) => [r.id, r.branch_id]);
+    let scheduleMap: Record<string, unknown[]> = {};
 
-    if (doctorIds.length > 0) {
+    if (doctorPairs.length > 0) {
+      const pairPlaceholders = doctorPairs.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
+      const schedParams = doctorPairs.flat();
       const schedRes = await query(
-        `SELECT id, doctor_id, day_of_week, appointment_type, start_time, end_time, max_appointments
+        `SELECT id, doctor_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments
          FROM doctor_schedules
-         WHERE doctor_id = ANY($1::int[])
+         WHERE (doctor_id, doctor_branch_id) IN (${pairPlaceholders})
            AND is_available = true
          ORDER BY day_of_week, start_time`,
-        [doctorIds],
+        schedParams,
       );
 
-      for (const row of schedRes.rows as Array<{ doctor_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
-        if (!scheduleMap[row.doctor_id]) scheduleMap[row.doctor_id] = [];
-        scheduleMap[row.doctor_id].push({
+      for (const row of schedRes.rows as Array<{ doctor_id: number; doctor_branch_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
+        const key = `${row.doctor_id}:${row.doctor_branch_id}`;
+        if (!scheduleMap[key]) scheduleMap[key] = [];
+        scheduleMap[key].push({
           schedule_id:      row.id,
           day_of_week:      row.day_of_week,
           dates:            [],
@@ -323,10 +380,13 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
     const total = parseInt(countRes.rows[0].count, 10);
     res.json({
       success: true,
-      data: dataRes.rows.map((doc: { id: number }) => ({
-        ...doc,
-        available_schedules: scheduleMap[doc.id] || [],
-      })),
+      data: dataRes.rows.map((doc: { id: number; branch_id: number }) => {
+        const key = `${doc.id}:${doc.branch_id}`;
+        return {
+          ...doc,
+          available_schedules: scheduleMap[key] || [],
+        };
+      }),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (err) {
@@ -376,7 +436,8 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     if (dayOfWeekList.length > 0) {
       const clause = `EXISTS (
         SELECT 1 FROM doctor_schedules ds
-        WHERE ds.doctor_id = d.id
+        WHERE ds.doctor_id = d.employee_id
+          AND ds.doctor_branch_id = d.branch_id
           AND ds.is_available = true
           AND ds.day_of_week = ANY($${dataIdx}::text[])
       )`;
@@ -386,7 +447,8 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
 
       const cClause = `EXISTS (
         SELECT 1 FROM doctor_schedules ds
-        WHERE ds.doctor_id = d.id
+        WHERE ds.doctor_id = d.employee_id
+          AND ds.doctor_branch_id = d.branch_id
           AND ds.is_available = true
           AND ds.day_of_week = ANY($${countIdx}::text[])
       )`;
@@ -443,8 +505,8 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
 
     const [dataRes, countRes] = await Promise.all([
       query(
-        `SELECT
-           d.id, d.specialization, d.qualification, d.experience_years,
+          `SELECT
+            d.employee_id AS id, d.branch_id, d.specialization, d.qualification, d.experience_years,
            d.consultation_fee, d.is_active,
            COALESCE(u.first_name, d.first_name) AS first_name,
            COALESCE(u.last_name,  d.last_name)  AS last_name,
@@ -461,25 +523,31 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     ]);
 
     // Fetch schedules for all matched doctors on the requested days
-    const doctorIds: number[] = dataRes.rows.map((r: { id: number }) => r.id);
-    let scheduleMap: Record<number, unknown[]> = {};
+    const doctorPairs: Array<[number, number]> = dataRes.rows.map((r: { id: number; branch_id: number }) => [r.id, r.branch_id]);
+    let scheduleMap: Record<string, unknown[]> = {};
 
-    if (doctorIds.length > 0 && dayOfWeekList.length > 0) {
+    if (doctorPairs.length > 0 && dayOfWeekList.length > 0) {
+      const pairPlaceholders = doctorPairs.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
+      const schedParams = doctorPairs.flat();
+      schedParams.push(dayOfWeekList);
+      const dayParamIdx = schedParams.length;
+
       const schedRes = await query(
-        `SELECT id, doctor_id, day_of_week, appointment_type, start_time, end_time, max_appointments
+        `SELECT id, doctor_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments
          FROM doctor_schedules
-         WHERE doctor_id = ANY($1::int[])
+         WHERE (doctor_id, doctor_branch_id) IN (${pairPlaceholders})
            AND is_available = true
-           AND day_of_week = ANY($2::text[])
+           AND day_of_week = ANY($${dayParamIdx}::text[])
          ORDER BY day_of_week, start_time`,
-        [doctorIds, dayOfWeekList],
+        schedParams,
       );
 
-      for (const row of schedRes.rows as Array<{ doctor_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
-        if (!scheduleMap[row.doctor_id]) scheduleMap[row.doctor_id] = [];
+      for (const row of schedRes.rows as Array<{ doctor_id: number; doctor_branch_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
+        const key = `${row.doctor_id}:${row.doctor_branch_id}`;
+        if (!scheduleMap[key]) scheduleMap[key] = [];
         // Find the matching dates for this day_of_week
         const matchingDates = dateList.filter(d => dateToDayMap[d] === row.day_of_week);
-        scheduleMap[row.doctor_id].push({
+        scheduleMap[key].push({
           schedule_id:      row.id,
           day_of_week:      row.day_of_week,
           dates:            matchingDates,
@@ -492,10 +560,13 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     }
 
     const total = parseInt(countRes.rows[0].count, 10);
-    const doctors = dataRes.rows.map((doc: { id: number }) => ({
-      ...doc,
-      available_schedules: scheduleMap[doc.id] || [],
-    }));
+    const doctors = dataRes.rows.map((doc: { id: number; branch_id: number }) => {
+      const key = `${doc.id}:${doc.branch_id}`;
+      return {
+        ...doc,
+        available_schedules: scheduleMap[key] || [],
+      };
+    });
 
     res.json({
       success: true,
@@ -510,8 +581,14 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
 // GET /doctors/:id/profile
 export const getDoctorProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
     const result = await query(
-      `SELECT d.id, d.user_id,
+      `SELECT d.employee_id AS id, d.branch_id, d.user_id,
               COALESCE(u.first_name, d.first_name) AS first_name,
               COALESCE(u.last_name,  d.last_name)  AS last_name,
               COALESCE(u.email,      d.email)      AS email,
@@ -525,9 +602,9 @@ export const getDoctorProfile = async (req: Request, res: Response, next: NextFu
        FROM doctors d
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN departments dept ON dept.id = d.department_id
-       WHERE d.id = $1
+      WHERE d.employee_id = $1 AND d.branch_id = $2
        LIMIT 1`,
-      [req.params.id],
+      [req.params.id, branchId],
     );
 
     if (result.rows.length === 0) {
@@ -544,11 +621,17 @@ export const getDoctorProfile = async (req: Request, res: Response, next: NextFu
 // GET /doctors/:id/schedule
 export const getDoctorScheduleByDate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
     const result = await query(
       `SELECT id, doctor_id, day_of_week, appointment_type,
               start_time, end_time, max_appointments, is_available
        FROM doctor_schedules
-       WHERE doctor_id = $1
+       WHERE doctor_id = $1 AND doctor_branch_id = $2
        ORDER BY
          CASE day_of_week
            WHEN 'Monday'    THEN 1
@@ -560,13 +643,14 @@ export const getDoctorScheduleByDate = async (req: Request, res: Response, next:
            WHEN 'Sunday'    THEN 7
          END,
          start_time ASC`,
-      [req.params.id],
+      [req.params.id, branchId],
     );
 
     res.json({
       success: true,
       data: {
         doctor_id: Number(req.params.id),
+        doctor_branch_id: branchId,
         schedules: result.rows,
       },
     });
@@ -579,7 +663,13 @@ export const getDoctorScheduleByDate = async (req: Request, res: Response, next:
 export const upsertDoctorProfileByDoctor = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const doctorId = parseInt(req.params.id, 10);
-    const allowed = await canDoctorManageProfile(req, doctorId);
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
+    const allowed = await canDoctorManageProfile(req, doctorId, branchId);
     if (!allowed) {
       res.status(403).json({ success: false, message: 'You can only update your own profile' });
       return;
@@ -607,7 +697,7 @@ export const upsertDoctorProfileByDoctor = async (req: AuthRequest, res: Respons
            consultation_fee = COALESCE($12, consultation_fee),
            bio = COALESCE($13, bio),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $14
+      WHERE employee_id = $14 AND branch_id = $15
        RETURNING *`,
       [
         first_name ?? null,
@@ -624,6 +714,7 @@ export const upsertDoctorProfileByDoctor = async (req: AuthRequest, res: Respons
         consultation_fee ?? null,
         about ?? null,
         doctorId,
+        branchId,
       ],
     );
 
@@ -657,7 +748,13 @@ export const upsertDoctorProfileByDoctor = async (req: AuthRequest, res: Respons
 export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const doctorId = parseInt(req.params.id, 10);
-    const allowed = await canDoctorManageProfile(req, doctorId);
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
+    const allowed = await canDoctorManageProfile(req, doctorId, branchId);
     if (!allowed) {
       res.status(403).json({ success: false, message: 'You can only manage your own schedule' });
       return;
@@ -708,10 +805,10 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
 
       const upsert = await query(
         `INSERT INTO doctor_schedules
-           (doctor_id, day_of_week, appointment_type, start_time, end_time, max_appointments, is_available)
-         VALUES ($1, $2, $3, $4, $5, $6, true)
+           (doctor_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments, is_available)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
          RETURNING *`,
-        [doctorId, normalizedDay, mappedType, start_time, end_time, maxAppointments],
+        [doctorId, branchId, normalizedDay, mappedType, start_time, end_time, maxAppointments],
       );
 
       updatedRows.push(upsert.rows[0]);
@@ -722,6 +819,7 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
       message: 'Doctor schedule saved successfully',
       data: {
         doctor_id: doctorId,
+        doctor_branch_id: branchId,
         schedules: updatedRows,
       },
     });
@@ -734,6 +832,11 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
 export const getDoctorAvailableSlots = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const doctorId = req.params.id;
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
 
     const d = new Date(`${date}T00:00:00`);
@@ -744,15 +847,15 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
       query(
         `SELECT id, appointment_type, start_time, end_time
          FROM doctor_schedules
-         WHERE doctor_id = $1 AND day_of_week = $2 AND is_available = true`,
-        [doctorId, dayOfWeek],
+         WHERE doctor_id = $1 AND doctor_branch_id = $2 AND day_of_week = $3 AND is_available = true`,
+        [doctorId, branchId, dayOfWeek],
       ),
       query(
         `SELECT appointment_time
          FROM appointments
-         WHERE doctor_id = $1 AND appointment_date = $2
+         WHERE doctor_id = $1 AND doctor_branch_id = $2 AND appointment_date = $3
            AND status NOT IN ('cancelled', 'no_show')`,
-        [doctorId, date],
+        [doctorId, branchId, date],
       ),
     ]);
 
@@ -781,7 +884,7 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
 
     res.json({
       success: true,
-      data: { doctor_id: Number(doctorId), date, day_of_week: dayOfWeek, available_slots: availableSlots },
+      data: { doctor_id: Number(doctorId), doctor_branch_id: branchId, date, day_of_week: dayOfWeek, available_slots: availableSlots },
     });
   } catch (err) {
     next(err);
@@ -800,7 +903,8 @@ export const updateDoctorSchedule = async (req: AuthRequest, res: Response, next
     }
 
     const doctorId = scheduleRes.rows[0].doctor_id;
-    const allowed = await canDoctorManageProfile(req, doctorId);
+    const doctorBranchId = scheduleRes.rows[0].doctor_branch_id;
+    const allowed = await canDoctorManageProfile(req, doctorId, doctorBranchId);
     if (!allowed) {
       res.status(403).json({ success: false, message: 'You can only update your own schedule' });
       return;
@@ -859,7 +963,8 @@ export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next
     }
 
     const doctorId = scheduleRes.rows[0].doctor_id;
-    const allowed = await canDoctorManageProfile(req, doctorId);
+    const doctorBranchId = scheduleRes.rows[0].doctor_branch_id;
+    const allowed = await canDoctorManageProfile(req, doctorId, doctorBranchId);
     if (!allowed) {
       res.status(403).json({ success: false, message: 'You can only delete your own schedule' });
       return;
@@ -876,6 +981,11 @@ export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next
 export const getDoctorBookedAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
 
     const result = await query(
       `SELECT a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
@@ -887,13 +997,14 @@ export const getDoctorBookedAppointments = async (req: Request, res: Response, n
        JOIN patients p ON p.id = a.patient_id
        LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
        WHERE a.doctor_id = $1
-         AND a.appointment_date = $2
+         AND a.doctor_branch_id = $2
+         AND a.appointment_date = $3
          AND a.status NOT IN ('cancelled', 'no_show')
        ORDER BY a.appointment_time ASC`,
-      [req.params.id, date],
+      [req.params.id, branchId, date],
     );
 
-    res.json({ success: true, data: { doctor_id: Number(req.params.id), date, appointments: result.rows } });
+    res.json({ success: true, data: { doctor_id: Number(req.params.id), doctor_branch_id: branchId, date, appointments: result.rows } });
   } catch (err) {
     next(err);
   }
@@ -902,13 +1013,19 @@ export const getDoctorBookedAppointments = async (req: Request, res: Response, n
 // GET /doctors/:id/specialization — get a specific doctor's specialization
 export const getDoctorSpecialization = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const branchId = getBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
     const result = await query(
-      `SELECT d.id, d.specialization,
+      `SELECT d.employee_id AS id, d.branch_id, d.specialization,
               CONCAT(COALESCE(u.first_name, d.first_name), ' ', COALESCE(u.last_name, d.last_name)) AS doctor_name
        FROM doctors d
        LEFT JOIN users u ON u.id = d.user_id
-       WHERE d.id = $1`,
-      [req.params.id],
+       WHERE d.employee_id = $1 AND d.branch_id = $2`,
+      [req.params.id, branchId],
     );
 
     if (result.rows.length === 0) {

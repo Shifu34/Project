@@ -67,13 +67,13 @@ export const createLabOrder = async (req: Request, res: Response, next: NextFunc
   try {
     await client.query('BEGIN');
 
-    const { encounter_id, patient_id, doctor_id, priority, clinical_notes, test_ids } = req.body;
+    const { encounter_id, patient_id, doctor_id, doctor_branch_id, priority, clinical_notes, test_ids } = req.body;
     const orderedBy = (req as Request & { user?: { userId: number } }).user?.userId;
 
     const orderRes = await client.query(
-      `INSERT INTO lab_orders (encounter_id, patient_id, doctor_id, ordered_by, priority, clinical_notes)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [encounter_id, patient_id, doctor_id, orderedBy, priority || 'routine', clinical_notes],
+      `INSERT INTO lab_orders (encounter_id, patient_id, doctor_id, doctor_branch_id, ordered_by, priority, clinical_notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [encounter_id, patient_id, doctor_id, doctor_branch_id, orderedBy, priority || 'routine', clinical_notes],
     );
     const order = orderRes.rows[0];
 
@@ -105,7 +105,7 @@ export const getLabOrderById = async (req: Request, res: Response, next: NextFun
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name
          FROM lab_orders lo
          JOIN patients p ON p.id = lo.patient_id
-         JOIN doctors d ON d.id = lo.doctor_id
+         JOIN doctors d ON d.employee_id = lo.doctor_id AND d.branch_id = lo.doctor_branch_id
          JOIN users u ON u.id = d.user_id
          WHERE lo.id = $1`,
         [req.params.id],
@@ -211,7 +211,7 @@ export const getLabOrders = async (req: Request, res: Response, next: NextFuncti
                 p.patient_code, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
          FROM lab_orders lo
          JOIN patients p ON p.id = lo.patient_id
-         JOIN doctors d ON d.id = lo.doctor_id
+         JOIN doctors d ON d.employee_id = lo.doctor_id AND d.branch_id = lo.doctor_branch_id
          JOIN users u ON u.id = d.user_id
          ${where}
          ORDER BY lo.order_date DESC LIMIT $1 OFFSET $2`,

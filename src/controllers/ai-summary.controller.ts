@@ -6,7 +6,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 // POST /ai-summaries
 // Body: { summary_type, content, patient_id, appointment_id?, encounter_id?,
 //         report_id?, lab_order_id?, radiology_order_id?, prescription_id?,
-//         doctor_id?, ai_model?, language? }
+//         doctor_id?, doctor_branch_id?, ai_model?, language? }
 // ─────────────────────────────────────────────────────────────────────────────
 export const createAiSummary = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -21,24 +21,30 @@ export const createAiSummary = async (req: AuthRequest, res: Response, next: Nex
       radiology_order_id  = null,
       prescription_id     = null,
       doctor_id           = null,
+      doctor_branch_id    = null,
       ai_model            = null,
       language            = 'en',
       structured_data     = null,
     } = req.body;
 
+    if ((doctor_id !== null) !== (doctor_branch_id !== null)) {
+      res.status(400).json({ success: false, message: 'doctor_id and doctor_branch_id must be provided together' });
+      return;
+    }
+
     const result = await query(
       `INSERT INTO ai_summaries
          (summary_type, content, structured_data, patient_id, appointment_id, encounter_id,
           report_id, lab_order_id, radiology_order_id, prescription_id,
-          doctor_id, ai_model, language, generated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          doctor_id, doctor_branch_id, ai_model, language, generated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [
         summary_type, content,
         structured_data ? JSON.stringify(structured_data) : null,
         patient_id, appointment_id, encounter_id,
         report_id, lab_order_id, radiology_order_id, prescription_id,
-        doctor_id, ai_model, language, req.user?.userId ?? null,
+        doctor_id, doctor_branch_id, ai_model, language, req.user?.userId ?? null,
       ],
     );
 
@@ -52,8 +58,8 @@ export const createAiSummary = async (req: AuthRequest, res: Response, next: Nex
 // POST /ai-summaries/call-summary
 // Convenience wrapper: saves a post-call summary (summary_type='call') visible
 // to both doctor and patient. Links to appointment (and optionally encounter).
-// Body: { appointment_id, patient_id, doctor_id?, content, structured_data?,
-//         encounter_id?, ai_model?, language? }
+// Body: { appointment_id, patient_id, doctor_id?, doctor_branch_id?, content,
+//         structured_data?, encounter_id?, ai_model?, language? }
 // ─────────────────────────────────────────────────────────────────────────────
 export const createCallSummary = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -61,6 +67,7 @@ export const createCallSummary = async (req: AuthRequest, res: Response, next: N
       appointment_id,
       patient_id,
       doctor_id       = null,
+      doctor_branch_id = null,
       encounter_id    = null,
       content,
       structured_data = null,
@@ -73,16 +80,21 @@ export const createCallSummary = async (req: AuthRequest, res: Response, next: N
       return;
     }
 
+    if ((doctor_id !== null) !== (doctor_branch_id !== null)) {
+      res.status(400).json({ success: false, message: 'doctor_id and doctor_branch_id must be provided together' });
+      return;
+    }
+
     const result = await query(
       `INSERT INTO ai_summaries
          (summary_type, content, structured_data, patient_id, appointment_id,
-          encounter_id, doctor_id, ai_model, language, generated_by)
-       VALUES ('call',$1,$2,$3,$4,$5,$6,$7,$8,$9)
+          encounter_id, doctor_id, doctor_branch_id, ai_model, language, generated_by)
+       VALUES ('call',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
         content,
         structured_data ? JSON.stringify(structured_data) : null,
-        patient_id, appointment_id, encounter_id, doctor_id,
+        patient_id, appointment_id, encounter_id, doctor_id, doctor_branch_id,
         ai_model, language, req.user?.userId ?? null,
       ],
     );
@@ -114,7 +126,7 @@ export const getCallSummary = async (req: AuthRequest, res: Response, next: Next
        FROM ai_summaries s
        LEFT JOIN users    u ON u.id = s.generated_by
        LEFT JOIN patients p ON p.id = s.patient_id
-       LEFT JOIN doctors  d ON d.id = s.doctor_id
+       LEFT JOIN doctors  d ON d.employee_id = s.doctor_id AND d.branch_id = s.doctor_branch_id
        WHERE s.appointment_id = $1
          AND s.summary_type   = 'call'
        ORDER BY s.created_at DESC`,
@@ -190,7 +202,7 @@ export const getAiSummaries = async (req: AuthRequest, res: Response, next: Next
     const dataRes = await query(
       `SELECT s.id, s.summary_type, s.patient_id, s.appointment_id,
               s.encounter_id, s.report_id, s.lab_order_id,
-              s.radiology_order_id, s.prescription_id, s.doctor_id,
+              s.radiology_order_id, s.prescription_id, s.doctor_id, s.doctor_branch_id,
               s.ai_model, s.language, s.created_at, s.structured_data,
               s.content,
               CONCAT(u.first_name,' ',u.last_name) AS generated_by_name

@@ -42,7 +42,7 @@ export const getDashboardStats = async (_req: Request, res: Response, next: Next
                     CONCAT(u.first_name,' ',u.last_name) AS doctor_name
              FROM appointments a
              JOIN patients p ON p.id = a.patient_id
-             JOIN doctors d ON d.id = a.doctor_id
+             JOIN doctors d ON d.employee_id = a.doctor_id AND d.branch_id = a.doctor_branch_id
              JOIN users u ON u.id = d.user_id
              WHERE a.appointment_date = CURRENT_DATE
              ORDER BY a.appointment_time ASC
@@ -53,7 +53,7 @@ export const getDashboardStats = async (_req: Request, res: Response, next: Next
                     CONCAT(u.first_name,' ',u.last_name) AS doctor_name
              FROM encounters e
              JOIN patients p ON p.id = e.patient_id
-             JOIN doctors d ON d.id = e.doctor_id
+             JOIN doctors d ON d.employee_id = e.doctor_id AND d.branch_id = e.doctor_branch_id
              JOIN users u ON u.id = d.user_id
              WHERE e.status = 'in_progress'
              ORDER BY e.encounter_date DESC

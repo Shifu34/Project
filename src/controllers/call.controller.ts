@@ -85,7 +85,7 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
 
     // 1. Fetch appointment ------------------------------------------------
     const apptResult = await query(
-      `SELECT a.id, a.patient_id, a.doctor_id, a.appointment_type, a.reason,
+      `SELECT a.id, a.patient_id, a.doctor_id, a.doctor_branch_id, a.appointment_type, a.reason,
               p.first_name || ' ' || p.last_name AS patient_name,
               d.first_name || ' ' || d.last_name AS doctor_name,
               d.user_id AS doctor_user_id,
@@ -94,7 +94,7 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
               u.email AS doctor_email
        FROM appointments a
        JOIN patients p ON p.id = a.patient_id
-       JOIN doctors  d ON d.id = a.doctor_id
+       JOIN doctors  d ON d.employee_id = a.doctor_id AND d.branch_id = a.doctor_branch_id
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN roles r ON r.id = u.role_id
        WHERE a.id = $1`,
@@ -146,10 +146,10 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
     // 4. Persist to DB ----------------------------------------------------
     const insertResult = await query(
       `INSERT INTO video_call_rooms
-         (appointment_id, patient_id, doctor_id, room_id, patient_room_code, doctor_room_code)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (appointment_id, patient_id, doctor_id, doctor_branch_id, room_id, patient_room_code, doctor_room_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [appointment_id, appt.patient_id, appt.doctor_id, roomId, patientRoomCode, doctorRoomCode],
+      [appointment_id, appt.patient_id, appt.doctor_id, appt.doctor_branch_id, roomId, patientRoomCode, doctorRoomCode],
     );
 
     // 5. Notify FDA agent — awaited so registration completes BEFORE

@@ -144,7 +144,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     // Fetch doctor_id if the user is a doctor
     let doctorId: number | null = null;
     if (user.role_name === 'doctor') {
-      const doctorRes = await query(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [user.id]);
+      const doctorRes = await query(`SELECT employee_id AS id FROM doctors WHERE user_id = $1 LIMIT 1`, [user.id]);
       if (doctorRes.rows.length > 0) doctorId = doctorRes.rows[0].id;
     }
 

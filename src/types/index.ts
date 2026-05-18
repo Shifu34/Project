@@ -142,6 +142,7 @@ export interface Department {
   name: string;
   description?: string;
   head_doctor_id?: number;
+  head_doctor_branch_id?: number;
   phone?: string;
   location?: string;
   is_active: boolean;
@@ -150,8 +151,12 @@ export interface Department {
 }
 
 export interface Doctor {
-  id: number;
+  id?: number; // legacy alias in API responses
+  employee_id?: number;
   user_id: number;
+  organization_id?: number | null;
+  branch_id?: number | null;
+  account_status?: 'unclaimed' | 'claim_pending' | 'active' | 'rejected' | 'suspended' | 'inactive';
   department_id?: number;
   specialization?: string;
   license_number?: string;
@@ -167,6 +172,7 @@ export interface Doctor {
 export interface DoctorSchedule {
   id: number;
   doctor_id: number;
+  doctor_branch_id: number;
   day_of_week: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
   start_time: string;
   end_time: string;
@@ -180,12 +186,13 @@ export interface Appointment {
   id: number;
   patient_id: number;
   doctor_id: number;
+  doctor_branch_id: number;
   department_id?: number;
   appointment_date: Date;
   appointment_time: string;
   duration_minutes: number;
   appointment_type?: 'consultation' | 'follow_up' | 'emergency' | 'procedure' | 'checkup';
-  status: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+  status: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show' | 'payment_timeout';
   reason?: string;
   notes?: string;
   booked_by?: number;
@@ -227,6 +234,7 @@ export interface Encounter {
   appointment_id?: number;
   patient_id: number;
   doctor_id: number;
+  doctor_branch_id: number;
   encounter_date: Date;
   encounter_type?: 'outpatient' | 'inpatient' | 'emergency' | 'telemedicine';
   chief_complaint?: string;
@@ -245,6 +253,7 @@ export interface Diagnosis {
   encounter_id: number;
   patient_id: number;
   doctor_id: number;
+  doctor_branch_id: number;
   icd_code?: string;
   diagnosis_text: string;
   diagnosis_type?: 'primary' | 'secondary' | 'differential';
@@ -290,6 +299,7 @@ export interface Prescription {
   encounter_id: number;
   patient_id: number;
   doctor_id: number;
+  doctor_branch_id: number;
   prescription_date: Date;
   valid_until?: Date;
   status: 'active' | 'dispensed' | 'partially_dispensed' | 'expired' | 'cancelled';
@@ -364,6 +374,7 @@ export interface LabOrder {
   encounter_id: number;
   patient_id: number;
   doctor_id: number;
+  doctor_branch_id: number;
   ordered_by: number;
   order_date: Date;
   priority: 'routine' | 'urgent' | 'stat';
@@ -407,6 +418,7 @@ export interface RadiologyOrder {
   encounter_id: number;
   patient_id: number;
   doctor_id: number;
+  doctor_branch_id: number;
   ordered_by: number;
   order_date: Date;
   priority: 'routine' | 'urgent' | 'stat';

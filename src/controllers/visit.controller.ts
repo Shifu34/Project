@@ -5,7 +5,7 @@ import { query } from '../config/database';
 export const createVisit = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const {
-      appointment_id, patient_id, doctor_id, encounter_type,
+      appointment_id, patient_id, doctor_id, doctor_branch_id, encounter_type,
       chief_complaint, history_of_present_illness,
     } = req.body;
 
@@ -17,10 +17,10 @@ export const createVisit = async (req: Request, res: Response, next: NextFunctio
     }
 
     const result = await query(
-      `INSERT INTO encounters (appointment_id, patient_id, doctor_id, encounter_type,
+      `INSERT INTO encounters (appointment_id, patient_id, doctor_id, doctor_branch_id, encounter_type,
        chief_complaint, history_of_present_illness)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [appointment_id, patient_id, doctor_id, encounter_type,
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [appointment_id, patient_id, doctor_id, doctor_branch_id, encounter_type,
        chief_complaint, history_of_present_illness],
     );
 
@@ -37,9 +37,9 @@ export const getVisitById = async (req: Request, res: Response, next: NextFuncti
       `SELECT e.*,
               CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
               CONCAT(u.first_name,' ',u.last_name) AS doctor_name
-       FROM encounters e
-       JOIN patients p ON p.id = e.patient_id
-       JOIN doctors doc ON doc.id = e.doctor_id
+      FROM encounters e
+      JOIN patients p ON p.id = e.patient_id
+      JOIN doctors doc ON doc.employee_id = e.doctor_id AND doc.branch_id = e.doctor_branch_id
        JOIN users u ON u.id = doc.user_id
        WHERE e.id = $1`,
       [req.params.id],
@@ -121,12 +121,12 @@ export const recordVitalSigns = async (req: Request, res: Response, next: NextFu
 // POST /encounters/:id/diagnoses
 export const addDiagnosis = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { patient_id, doctor_id, icd_code, diagnosis_text, diagnosis_type, notes } = req.body;
+    const { patient_id, doctor_id, doctor_branch_id, icd_code, diagnosis_text, diagnosis_type, notes } = req.body;
 
     const result = await query(
-      `INSERT INTO diagnoses (encounter_id, patient_id, doctor_id, icd_code, diagnosis_text, diagnosis_type, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.params.id, patient_id, doctor_id, icd_code, diagnosis_text, diagnosis_type, notes],
+      `INSERT INTO diagnoses (encounter_id, patient_id, doctor_id, doctor_branch_id, icd_code, diagnosis_text, diagnosis_type, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.params.id, patient_id, doctor_id, doctor_branch_id, icd_code, diagnosis_text, diagnosis_type, notes],
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -190,8 +190,8 @@ export const getEncounterFull = async (req: Request, res: Response, next: NextFu
               CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
               d.specialization AS doctor_specialization,
               dept.name AS department_name
-       FROM encounters e
-       JOIN doctors d ON d.id = e.doctor_id
+      FROM encounters e
+      JOIN doctors d ON d.employee_id = e.doctor_id AND d.branch_id = e.doctor_branch_id
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN departments dept ON dept.id = (
            SELECT department_id FROM appointments WHERE id = e.appointment_id LIMIT 1
@@ -224,7 +224,7 @@ export const getEncounterFull = async (req: Request, res: Response, next: NextFu
       query(
         `SELECT diag.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
          FROM diagnoses diag
-         JOIN doctors d ON d.id = diag.doctor_id
+         JOIN doctors d ON d.employee_id = diag.doctor_id AND d.branch_id = diag.doctor_branch_id
          LEFT JOIN users u ON u.id = d.user_id
          WHERE diag.encounter_id = $1
          ORDER BY diag.diagnosed_date ASC`,
@@ -255,7 +255,7 @@ export const getEncounterFull = async (req: Request, res: Response, next: NextFu
                   ) ORDER BY pi.id
                 ) FILTER (WHERE pi.id IS NOT NULL) AS items
          FROM prescriptions p
-         JOIN doctors d ON d.id = p.doctor_id
+         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
          WHERE p.encounter_id = $1

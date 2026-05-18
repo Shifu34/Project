@@ -34,7 +34,7 @@ export const getReportById = async (req: Request, res: Response, next: NextFunct
                 ro.status          AS radiology_status
          FROM medical_reports mr
          JOIN patients p ON p.id = mr.patient_id
-         LEFT JOIN doctors d ON d.id = mr.doctor_id
+         LEFT JOIN doctors d ON d.employee_id = mr.doctor_id AND d.branch_id = mr.doctor_branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN departments dept ON dept.id = (
              SELECT department_id FROM appointments
@@ -135,7 +135,7 @@ export const getReports = async (req: Request, res: Response, next: NextFunction
                 (SELECT COUNT(*) FROM report_files rf WHERE rf.report_id = mr.id) AS file_count
          FROM medical_reports mr
          JOIN patients p ON p.id = mr.patient_id
-         LEFT JOIN doctors d ON d.id = mr.doctor_id
+         LEFT JOIN doctors d ON d.employee_id = mr.doctor_id AND d.branch_id = mr.doctor_branch_id
          LEFT JOIN users u ON u.id = d.user_id
          ${where}
          ORDER BY mr.report_date DESC, mr.created_at DESC
@@ -242,7 +242,7 @@ export const summarizeReport = async (req: Request, res: Response, next: NextFun
               e.plan
        FROM medical_reports mr
        JOIN patients p ON p.id = mr.patient_id
-       LEFT JOIN doctors d ON d.id = mr.doctor_id
+      LEFT JOIN doctors d ON d.employee_id = mr.doctor_id AND d.branch_id = mr.doctor_branch_id
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN encounters e ON e.id = mr.encounter_id
        WHERE mr.id = $1`,

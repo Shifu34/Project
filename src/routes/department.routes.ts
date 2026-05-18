@@ -15,6 +15,7 @@ router.get('/:id', deptCtrl.getDepartmentById);
 router.post('/',
   authorize('admin'),
   body('name').notEmpty().trim(),
+  body('head_doctor_branch_id').optional().isInt(),
   validate,
   deptCtrl.createDepartment,
 );
@@ -22,6 +23,7 @@ router.post('/',
 router.put('/:id',
   authorize('admin'),
   body('name').notEmpty().trim(),
+  body('head_doctor_branch_id').optional().isInt(),
   validate,
   deptCtrl.updateDepartment,
 );

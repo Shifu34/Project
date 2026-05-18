@@ -7,13 +7,13 @@ export const createPrescription = async (req: Request, res: Response, next: Next
   try {
     await client.query('BEGIN');
 
-    const { encounter_id, patient_id, doctor_id, valid_until, notes, items } = req.body;
+    const { encounter_id, patient_id, doctor_id, doctor_branch_id, valid_until, notes, items } = req.body;
     // items: [{inventory_item_id?, medication_name, dosage, frequency, duration, quantity, route, instructions}]
 
     const prescRes = await client.query(
-      `INSERT INTO prescriptions (encounter_id, patient_id, doctor_id, valid_until, notes)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [encounter_id, patient_id, doctor_id, valid_until, notes],
+      `INSERT INTO prescriptions (encounter_id, patient_id, doctor_id, doctor_branch_id, valid_until, notes)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [encounter_id, patient_id, doctor_id, doctor_branch_id, valid_until, notes],
     );
     const prescription = prescRes.rows[0];
 
@@ -47,7 +47,7 @@ export const getPrescriptionById = async (req: Request, res: Response, next: Nex
         `SELECT p.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 CONCAT(pt.first_name,' ',pt.last_name) AS patient_name, pt.patient_code
          FROM prescriptions p
-         JOIN doctors d ON d.id = p.doctor_id
+         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
          JOIN users u ON u.id = d.user_id
          JOIN patients pt ON pt.id = p.patient_id
          WHERE p.id = $1`,
@@ -96,7 +96,7 @@ export const getActivePatientMedications = async (req: Request, res: Response, n
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 d.specialization
          FROM prescriptions p
-         JOIN doctors d ON d.id = p.doctor_id
+         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
          JOIN users u ON u.id = d.user_id
          WHERE p.patient_id = $1
            AND p.status = 'active'
@@ -156,7 +156,7 @@ export const getPrescriptions = async (req: Request, res: Response, next: NextFu
         `SELECT p.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 CONCAT(pt.first_name,' ',pt.last_name) AS patient_name, pt.patient_code
          FROM prescriptions p
-         JOIN doctors d ON d.id = p.doctor_id
+         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
          JOIN users u ON u.id = d.user_id
          JOIN patients pt ON pt.id = p.patient_id
          ${where}

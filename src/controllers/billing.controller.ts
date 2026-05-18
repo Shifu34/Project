@@ -38,7 +38,7 @@ export const getMyPayments = async (req: AuthRequest, res: Response, next: NextF
                 doc.specialization
          FROM payments py
          LEFT JOIN appointments a ON a.id = py.appointment_id
-         LEFT JOIN doctors doc ON doc.id = a.doctor_id
+         LEFT JOIN doctors doc ON doc.employee_id = a.doctor_id AND doc.branch_id = a.doctor_branch_id
          ${where}
          ORDER BY py.paid_at DESC LIMIT $1 OFFSET $2`,
         params,
@@ -256,7 +256,7 @@ export const processPayment = async (req: AuthRequest, res: Response, next: Next
     const apptRes = await query(
       `SELECT a.id, a.status, a.patient_id, COALESCE(d.consultation_fee, 0) AS consultation_fee
        FROM appointments a
-       JOIN doctors d ON d.id = a.doctor_id
+      JOIN doctors d ON d.employee_id = a.doctor_id AND d.branch_id = a.doctor_branch_id
        WHERE a.id = $1 LIMIT 1`,
       [appointment_id],
     );

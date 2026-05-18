@@ -55,7 +55,7 @@ export const getCallTranscriptionById = async (req: AuthRequest, res: Response, 
        LEFT JOIN appointments a   ON a.id = ct.appointment_id
        LEFT JOIN patients p       ON p.id = a.patient_id
        LEFT JOIN users pu         ON pu.id = p.user_id
-       LEFT JOIN doctors d        ON d.id = a.doctor_id
+      LEFT JOIN doctors d        ON d.employee_id = a.doctor_id AND d.branch_id = a.doctor_branch_id
        LEFT JOIN users du         ON du.id = d.user_id
        WHERE ct.id = $1`,
       [req.params.id],
@@ -106,7 +106,7 @@ export const getCallTranscriptions = async (req: AuthRequest, res: Response, nex
          LEFT JOIN appointments a ON a.id = ct.appointment_id
          LEFT JOIN patients p     ON p.id = a.patient_id
          LEFT JOIN users pu       ON pu.id = p.user_id
-         LEFT JOIN doctors d      ON d.id = a.doctor_id
+         LEFT JOIN doctors d      ON d.employee_id = a.doctor_id AND d.branch_id = a.doctor_branch_id
          LEFT JOIN users du       ON du.id = d.user_id
          ${where}
          ORDER BY ct.created_at DESC

@@ -24,6 +24,25 @@ CREATE TABLE organizations (
 );
 
 -- =============================================================
+-- 1B. BRANCHES (organization locations)
+-- =============================================================
+CREATE TABLE branches (
+    id              SERIAL PRIMARY KEY,
+    organization_id INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    branch_seq      INT NOT NULL,
+    branch_code     TEXT NOT NULL, -- e.g. "1.1" (org_id.branch_seq)
+    name            VARCHAR(150) NOT NULL,
+    location        VARCHAR(255) NOT NULL,
+    phone           VARCHAR(50),
+    email           VARCHAR(255),
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organization_id, branch_seq),
+    UNIQUE (branch_code)
+);
+
+-- =============================================================
 -- 2. ROLES
 -- =============================================================
 CREATE TABLE roles (
@@ -157,6 +176,7 @@ CREATE TABLE departments (
     name            VARCHAR(100) NOT NULL UNIQUE,
     description     TEXT,
     head_doctor_id  INT,
+    head_doctor_branch_id INT,
     phone           VARCHAR(20),
     location        VARCHAR(100),
     is_active       BOOLEAN DEFAULT TRUE,
@@ -168,8 +188,12 @@ CREATE TABLE departments (
 -- 9. DOCTORS
 -- =============================================================
 CREATE TABLE doctors (
-    id               SERIAL PRIMARY KEY,
+    employee_id      SERIAL,
     user_id          INT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+    organization_id  INT REFERENCES organizations(id) ON DELETE SET NULL,
+    branch_id        INT NOT NULL REFERENCES branches(id) ON DELETE SET NULL,
+    account_status   VARCHAR(20) NOT NULL DEFAULT 'unclaimed'
+                         CHECK (account_status IN ('unclaimed','claim_pending','active','rejected','suspended','inactive')),
     department_id    INT REFERENCES departments(id) ON DELETE SET NULL,
     -- Personal info stored directly so migrated doctors (user_id=NULL) still have names/contact
     first_name       VARCHAR(100),
@@ -186,15 +210,18 @@ CREATE TABLE doctors (
     bio              TEXT,
     is_active        BOOLEAN DEFAULT TRUE,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (employee_id, branch_id)
 );
 
 -- Partial unique index: allows multiple NULL license_numbers (migrated doctors without pid)
 CREATE UNIQUE INDEX doctors_license_nr_uidx ON doctors (license_number) WHERE license_number IS NOT NULL;
 
 ALTER TABLE departments
-    ADD CONSTRAINT fk_head_doctor
-    FOREIGN KEY (head_doctor_id) REFERENCES doctors(id) ON DELETE SET NULL;
+    ADD CONSTRAINT departments_head_doctor_fkey
+    FOREIGN KEY (head_doctor_id, head_doctor_branch_id)
+    REFERENCES doctors(employee_id, branch_id) ON DELETE SET NULL;
+
 
 -- =============================================================
 -- 10. DOCTOR_SCHEDULES
@@ -207,7 +234,8 @@ ALTER TABLE departments
 ALTER TABLE doctor_schedules DROP CONSTRAINT IF EXISTS doctor_schedules_doctor_day_type_key;
 CREATE TABLE IF NOT EXISTS doctor_schedules (
     id               SERIAL PRIMARY KEY,
-    doctor_id        INT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
+    doctor_id        INT NOT NULL,
+    doctor_branch_id INT NOT NULL,
     day_of_week      VARCHAR(10) NOT NULL
                          CHECK (day_of_week IN ('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')),
     appointment_type VARCHAR(30) NOT NULL DEFAULT 'Online Consultation'
@@ -220,6 +248,9 @@ CREATE TABLE IF NOT EXISTS doctor_schedules (
     updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     -- No unique constraint: multiple slots per day/type are allowed
 );
+ALTER TABLE doctor_schedules
+    ADD CONSTRAINT doctor_schedules_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id) ON DELETE CASCADE;
 
 -- =============================================================
 -- 11. NATURE_OF_VISIT
@@ -238,7 +269,8 @@ CREATE TABLE IF NOT EXISTS nature_of_visit (
 CREATE TABLE appointments (
     id                  SERIAL PRIMARY KEY,
     patient_id          INT NOT NULL REFERENCES patients(id),
-    doctor_id           INT NOT NULL REFERENCES doctors(id),
+    doctor_id           INT NOT NULL,
+    doctor_branch_id    INT NOT NULL,
     department_id       INT REFERENCES departments(id),
     appointment_date    DATE NOT NULL,
     appointment_time    TIME NOT NULL,
@@ -256,6 +288,9 @@ CREATE TABLE appointments (
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE appointments
+    ADD CONSTRAINT appointments_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
 -- 12. PAYMENTS
@@ -300,7 +335,8 @@ CREATE TABLE encounters (
     id                         SERIAL PRIMARY KEY,
     appointment_id             INT UNIQUE REFERENCES appointments(id) ON DELETE SET NULL,
     patient_id                 INT NOT NULL REFERENCES patients(id),
-    doctor_id                  INT NOT NULL REFERENCES doctors(id),
+    doctor_id                  INT NOT NULL,
+    doctor_branch_id           INT NOT NULL,
     encounter_date             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     encounter_type             VARCHAR(20) CHECK (encounter_type IN
                                    ('outpatient','inpatient','emergency','telemedicine')),
@@ -315,6 +351,9 @@ CREATE TABLE encounters (
     created_at                 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at                 TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE encounters
+    ADD CONSTRAINT encounters_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
 -- 15. DIAGNOSES
@@ -323,7 +362,8 @@ CREATE TABLE diagnoses (
     id             SERIAL PRIMARY KEY,
     encounter_id   INT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
     patient_id     INT NOT NULL REFERENCES patients(id),
-    doctor_id      INT NOT NULL REFERENCES doctors(id),
+    doctor_id      INT NOT NULL,
+    doctor_branch_id INT NOT NULL,
     icd_code       VARCHAR(20),
     diagnosis_text TEXT NOT NULL,
     diagnosis_type VARCHAR(20) CHECK (diagnosis_type IN ('primary','secondary','differential')),
@@ -333,6 +373,9 @@ CREATE TABLE diagnoses (
     notes          TEXT,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE diagnoses
+    ADD CONSTRAINT diagnoses_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
 -- 16. CLINICAL_NOTES
@@ -379,7 +422,8 @@ CREATE TABLE prescriptions (
     id                SERIAL PRIMARY KEY,
     encounter_id      INT NOT NULL REFERENCES encounters(id),
     patient_id        INT NOT NULL REFERENCES patients(id),
-    doctor_id         INT NOT NULL REFERENCES doctors(id),
+    doctor_id         INT NOT NULL,
+    doctor_branch_id  INT NOT NULL,
     prescription_date DATE DEFAULT CURRENT_DATE,
     valid_until       DATE,
     status            VARCHAR(25) DEFAULT 'active'
@@ -388,6 +432,9 @@ CREATE TABLE prescriptions (
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE prescriptions
+    ADD CONSTRAINT prescriptions_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
 -- 20. INVENTORY_ITEMS  (created before prescription_items for FK)
@@ -494,7 +541,8 @@ CREATE TABLE lab_orders (
     id             SERIAL PRIMARY KEY,
     encounter_id   INT NOT NULL REFERENCES encounters(id),
     patient_id     INT NOT NULL REFERENCES patients(id),
-    doctor_id      INT NOT NULL REFERENCES doctors(id),
+    doctor_id      INT NOT NULL,
+    doctor_branch_id INT NOT NULL,
     ordered_by     INT REFERENCES users(id) ON DELETE SET NULL,
     order_date     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     priority       VARCHAR(20) DEFAULT 'routine'
@@ -505,6 +553,9 @@ CREATE TABLE lab_orders (
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE lab_orders
+    ADD CONSTRAINT lab_orders_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
 -- 24. LAB_ORDER_ITEMS  (includes results)
@@ -551,7 +602,8 @@ CREATE TABLE radiology_orders (
     id             SERIAL PRIMARY KEY,
     encounter_id   INT NOT NULL REFERENCES encounters(id),
     patient_id     INT NOT NULL REFERENCES patients(id),
-    doctor_id      INT NOT NULL REFERENCES doctors(id),
+    doctor_id      INT NOT NULL,
+    doctor_branch_id INT NOT NULL,
     ordered_by     INT REFERENCES users(id) ON DELETE SET NULL,
     order_date     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     priority       VARCHAR(20) DEFAULT 'routine'
@@ -562,6 +614,9 @@ CREATE TABLE radiology_orders (
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE radiology_orders
+    ADD CONSTRAINT radiology_orders_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
 -- 27. RADIOLOGY_ORDER_ITEMS  (includes results)
@@ -699,6 +754,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_organizations_updated_at  BEFORE UPDATE ON organizations      FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+CREATE TRIGGER trg_branches_updated_at       BEFORE UPDATE ON branches           FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_users_updated_at          BEFORE UPDATE ON users              FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_user_profiles_updated_at  BEFORE UPDATE ON user_profiles      FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_patients_updated_at       BEFORE UPDATE ON patients           FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
@@ -725,12 +781,15 @@ CREATE TRIGGER trg_user_subs_updated_at      BEFORE UPDATE ON user_subscriptions
 CREATE INDEX idx_users_email            ON users(email);
 CREATE INDEX idx_users_role_id          ON users(role_id);
 
+CREATE INDEX idx_branches_org          ON branches(organization_id);
+CREATE INDEX idx_doctors_branch        ON doctors(branch_id);
+
 CREATE INDEX idx_patients_code          ON patients(patient_code);
 CREATE INDEX idx_patients_phone         ON patients(phone);
 CREATE INDEX idx_patients_email         ON patients(email);
 
 CREATE INDEX idx_appt_patient           ON appointments(patient_id);
-CREATE INDEX idx_appt_doctor            ON appointments(doctor_id);
+CREATE INDEX idx_appt_doctor            ON appointments(doctor_id, doctor_branch_id);
 CREATE INDEX idx_appt_date              ON appointments(appointment_date);
 CREATE INDEX idx_appt_status            ON appointments(status);
 
@@ -738,7 +797,7 @@ CREATE INDEX idx_payments_appointment   ON payments(appointment_id);
 CREATE INDEX idx_payments_patient       ON payments(patient_id);
 
 CREATE INDEX idx_encounters_patient     ON encounters(patient_id);
-CREATE INDEX idx_encounters_doctor      ON encounters(doctor_id);
+CREATE INDEX idx_encounters_doctor      ON encounters(doctor_id, doctor_branch_id);
 CREATE INDEX idx_encounters_date        ON encounters(encounter_date);
 CREATE INDEX idx_encounters_appt        ON encounters(appointment_id);
 
@@ -801,12 +860,16 @@ CREATE TABLE video_call_rooms (
     id                 SERIAL PRIMARY KEY,
     appointment_id     INT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
     patient_id         INT NOT NULL REFERENCES patients(id),
-    doctor_id          INT NOT NULL REFERENCES doctors(id),
+    doctor_id          INT NOT NULL,
+    doctor_branch_id   INT NOT NULL,
     room_id            VARCHAR(100) NOT NULL,
     patient_room_code  VARCHAR(50) NOT NULL,
     doctor_room_code   VARCHAR(50) NOT NULL,
     created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE video_call_rooms
+    ADD CONSTRAINT video_call_rooms_doctor_fkey
+    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 CREATE UNIQUE INDEX idx_vcr_appointment ON video_call_rooms(appointment_id);
 CREATE INDEX idx_vcr_room_id ON video_call_rooms(room_id);
 
