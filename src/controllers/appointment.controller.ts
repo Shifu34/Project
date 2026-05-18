@@ -532,12 +532,14 @@ export const getAppointmentEncounter = async (req: Request, res: Response, next:
               d.specialization,
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.patient_code
-      FROM encounters e
+       FROM encounters e
        JOIN doctors d ON d.employee_id = e.doctor_id AND d.branch_id = e.doctor_branch_id
        LEFT JOIN users u ON u.id = d.user_id
-      JOIN patients p ON p.id = a.patient_id
-      JOIN doctors doc ON doc.employee_id = a.doctor_id AND doc.branch_id = a.doctor_branch_id
-      JOIN users u ON u.id = doc.user_id
+       JOIN patients p ON p.id = e.patient_id
+       WHERE e.appointment_id = $1
+       ORDER BY e.encounter_date DESC
+       LIMIT 1`,
+      [appointmentId],
     );
 
     if (encRes.rows.length === 0) {
@@ -868,7 +870,7 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
     const userId = req.user?.userId;
 
     const encRes = await client.query(
-      `SELECT id, patient_id, doctor_id FROM encounters WHERE appointment_id = $1`,
+      `SELECT id, patient_id, doctor_id, doctor_branch_id FROM encounters WHERE appointment_id = $1`,
       [appointmentId],
     );
     if (encRes.rows.length === 0) {
@@ -876,7 +878,7 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
       await client.query('ROLLBACK');
       return;
     }
-    const { id: encounterId, patient_id, doctor_id } = encRes.rows[0];
+    const { id: encounterId, patient_id, doctor_id, doctor_branch_id } = encRes.rows[0];
 
     const {
       encounter,
@@ -958,10 +960,10 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
           // New diagnosis — insert it
           await client.query(
             `INSERT INTO diagnoses
-               (encounter_id, patient_id, doctor_id, icd_code, diagnosis_text,
-                diagnosis_type, status, notes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [encounterId, patient_id, doctor_id,
+              (encounter_id, patient_id, doctor_id, doctor_branch_id, icd_code, diagnosis_text,
+               diagnosis_type, status, notes)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [encounterId, patient_id, doctor_id, doctor_branch_id,
              d.icd_code ?? null, d.diagnosis_text,
              d.diagnosis_type ?? 'primary', d.status ?? 'active',
              d.notes ?? null],
