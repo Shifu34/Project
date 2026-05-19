@@ -1,11 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { query, getClient } from '../config/database';
 
-// GET /lab/tests?search=&organization_id=
+// GET /lab/tests?search=&branch_id=
 export const getLabTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const search = (req.query.search as string || '').trim();
-    const orgId  = req.query.organization_id ? Number(req.query.organization_id) : null;
+    const branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
 
     const params: unknown[] = [];
     const conditions: string[] = ['is_active = TRUE'];
@@ -14,9 +14,9 @@ export const getLabTests = async (req: Request, res: Response, next: NextFunctio
       params.push(`%${search}%`);
       conditions.push(`(name ILIKE $${params.length} OR code ILIKE $${params.length} OR category ILIKE $${params.length} OR description ILIKE $${params.length})`);
     }
-    if (orgId !== null) {
-      params.push(orgId);
-      conditions.push(`organization_id = $${params.length}`);
+    if (branchId !== null) {
+      params.push(branchId);
+      conditions.push(`branch_id = $${params.length}`);
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
@@ -31,11 +31,11 @@ export const getLabTests = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-// GET /lab/radiology-tests?search=&organization_id=
+// GET /lab/radiology-tests?search=&branch_id=
 export const getRadiologyTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const search = (req.query.search as string || '').trim();
-    const orgId  = req.query.organization_id ? Number(req.query.organization_id) : null;
+    const branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
 
     const params: unknown[] = [];
     const conditions: string[] = ['is_active = TRUE'];
@@ -44,9 +44,9 @@ export const getRadiologyTests = async (req: Request, res: Response, next: NextF
       params.push(`%${search}%`);
       conditions.push(`(name ILIKE $${params.length} OR code ILIKE $${params.length} OR modality ILIKE $${params.length} OR description ILIKE $${params.length})`);
     }
-    if (orgId !== null) {
-      params.push(orgId);
-      conditions.push(`organization_id = $${params.length}`);
+    if (branchId !== null) {
+      params.push(branchId);
+      conditions.push(`branch_id = $${params.length}`);
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
@@ -67,13 +67,13 @@ export const createLabOrder = async (req: Request, res: Response, next: NextFunc
   try {
     await client.query('BEGIN');
 
-    const { encounter_id, patient_id, doctor_id, doctor_branch_id, priority, clinical_notes, test_ids } = req.body;
+    const { encounter_id, patient_user_id, doctor_user_id, doctor_branch_id, priority, clinical_notes, test_ids } = req.body;
     const orderedBy = (req as Request & { user?: { userId: number } }).user?.userId;
 
     const orderRes = await client.query(
-      `INSERT INTO lab_orders (encounter_id, patient_id, doctor_id, doctor_branch_id, ordered_by, priority, clinical_notes)
+      `INSERT INTO lab_orders (encounter_id, patient_user_id, doctor_user_id, doctor_branch_id, ordered_by, priority, clinical_notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [encounter_id, patient_id, doctor_id, doctor_branch_id, orderedBy, priority || 'routine', clinical_notes],
+      [encounter_id, patient_user_id, doctor_user_id, doctor_branch_id, orderedBy, priority || 'routine', clinical_notes],
     );
     const order = orderRes.rows[0];
 
@@ -104,8 +104,8 @@ export const getLabOrderById = async (req: Request, res: Response, next: NextFun
         `SELECT lo.*, CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name
          FROM lab_orders lo
-         JOIN patients p ON p.id = lo.patient_id
-         JOIN doctors d ON d.employee_id = lo.doctor_id AND d.branch_id = lo.doctor_branch_id
+         JOIN patients p ON p.user_id = lo.patient_user_id
+         JOIN doctors d ON d.user_id = lo.doctor_user_id AND d.branch_id = lo.doctor_branch_id
          JOIN users u ON u.id = d.user_id
          WHERE lo.id = $1`,
         [req.params.id],
@@ -192,7 +192,7 @@ export const getLabOrders = async (req: Request, res: Response, next: NextFuncti
   try {
     const page      = Math.max(1, parseInt(req.query.page as string || '1',  10));
     const limit     = Math.min(100, parseInt(req.query.limit as string || '20', 10));
-    const patientId = req.query.patient_id as string | undefined;
+    const patientUserId = req.query.patient_user_id as string | undefined;
     const status    = req.query.status    as string | undefined;
     const offset    = (page - 1) * limit;
 
@@ -200,7 +200,7 @@ export const getLabOrders = async (req: Request, res: Response, next: NextFuncti
     const params: unknown[] = [limit, offset];
     let idx = 3;
 
-    if (patientId) { conditions.push(`lo.patient_id = $${idx++}`); params.push(patientId); }
+    if (patientUserId) { conditions.push(`lo.patient_user_id = $${idx++}`); params.push(patientUserId); }
     if (status)    { conditions.push(`lo.status = $${idx++}`);     params.push(status); }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -210,8 +210,8 @@ export const getLabOrders = async (req: Request, res: Response, next: NextFuncti
         `SELECT lo.*, CONCAT(p.first_name,' ',p.last_name) AS patient_name,
                 p.patient_code, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
          FROM lab_orders lo
-         JOIN patients p ON p.id = lo.patient_id
-         JOIN doctors d ON d.employee_id = lo.doctor_id AND d.branch_id = lo.doctor_branch_id
+         JOIN patients p ON p.user_id = lo.patient_user_id
+         JOIN doctors d ON d.user_id = lo.doctor_user_id AND d.branch_id = lo.doctor_branch_id
          JOIN users u ON u.id = d.user_id
          ${where}
          ORDER BY lo.order_date DESC LIMIT $1 OFFSET $2`,

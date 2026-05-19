@@ -21,7 +21,7 @@ router.post(
   authenticate,
   [
     body('appointment_id').isInt({ min: 1 }),
-    body('patient_id').isInt({ min: 1 }),
+    body('patient_user_id').isInt({ min: 1 }),
     body('content').notEmpty(),
   ],
   validate,
@@ -38,7 +38,7 @@ router.post(
   [
     body('summary_type').isIn(VALID_TYPES).withMessage(`summary_type must be one of: ${VALID_TYPES.join(', ')}`),
     body('content').notEmpty().withMessage('content is required'),
-    body('patient_id').isInt({ min: 1 }).withMessage('patient_id must be a positive integer'),
+    body('patient_user_id').isInt({ min: 1 }).withMessage('patient_user_id must be a positive integer'),
   ],
   validate,
   createAiSummary,

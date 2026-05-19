@@ -5,7 +5,7 @@ import { query } from '../config/database';
 export const createVisit = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const {
-      appointment_id, patient_id, doctor_id, doctor_branch_id, encounter_type,
+      appointment_id, patient_user_id, doctor_user_id, encounter_type,
       chief_complaint, history_of_present_illness,
     } = req.body;
 
@@ -17,10 +17,10 @@ export const createVisit = async (req: Request, res: Response, next: NextFunctio
     }
 
     const result = await query(
-      `INSERT INTO encounters (appointment_id, patient_id, doctor_id, doctor_branch_id, encounter_type,
+      `INSERT INTO encounters (appointment_id, patient_user_id, doctor_user_id, encounter_type,
        chief_complaint, history_of_present_illness)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [appointment_id, patient_id, doctor_id, doctor_branch_id, encounter_type,
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [appointment_id, patient_user_id, doctor_user_id, encounter_type,
        chief_complaint, history_of_present_illness],
     );
 
@@ -38,8 +38,8 @@ export const getVisitById = async (req: Request, res: Response, next: NextFuncti
               CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
               CONCAT(u.first_name,' ',u.last_name) AS doctor_name
       FROM encounters e
-      JOIN patients p ON p.id = e.patient_id
-      JOIN doctors doc ON doc.employee_id = e.doctor_id AND doc.branch_id = e.doctor_branch_id
+            JOIN patients p ON p.user_id = e.patient_user_id
+            JOIN doctors doc ON doc.user_id = e.doctor_user_id
        JOIN users u ON u.id = doc.user_id
        WHERE e.id = $1`,
       [req.params.id],
@@ -94,7 +94,7 @@ export const updateVisit = async (req: Request, res: Response, next: NextFunctio
 export const recordVitalSigns = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const {
-      patient_id, temperature, blood_pressure_systolic, blood_pressure_diastolic,
+      patient_user_id, temperature, blood_pressure_systolic, blood_pressure_diastolic,
       heart_rate, respiratory_rate, oxygen_saturation, weight, height, bmi,
       blood_glucose, pain_scale, notes,
     } = req.body;
@@ -103,11 +103,11 @@ export const recordVitalSigns = async (req: Request, res: Response, next: NextFu
 
     const result = await query(
       `INSERT INTO vitals
-         (encounter_id, patient_id, recorded_by, temperature, blood_pressure_systolic,
+        (encounter_id, patient_user_id, recorded_by, temperature, blood_pressure_systolic,
           blood_pressure_diastolic, heart_rate, respiratory_rate, oxygen_saturation,
           weight, height, bmi, blood_glucose, pain_scale, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [req.params.id, patient_id, recordedBy, temperature, blood_pressure_systolic,
+      [req.params.id, patient_user_id, recordedBy, temperature, blood_pressure_systolic,
        blood_pressure_diastolic, heart_rate, respiratory_rate, oxygen_saturation,
        weight, height, bmi, blood_glucose, pain_scale, notes],
     );
@@ -121,12 +121,12 @@ export const recordVitalSigns = async (req: Request, res: Response, next: NextFu
 // POST /encounters/:id/diagnoses
 export const addDiagnosis = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { patient_id, doctor_id, doctor_branch_id, icd_code, diagnosis_text, diagnosis_type, notes } = req.body;
+    const { patient_user_id, doctor_user_id, icd_code, diagnosis_text, diagnosis_type, notes } = req.body;
 
     const result = await query(
-      `INSERT INTO diagnoses (encounter_id, patient_id, doctor_id, doctor_branch_id, icd_code, diagnosis_text, diagnosis_type, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.params.id, patient_id, doctor_id, doctor_branch_id, icd_code, diagnosis_text, diagnosis_type, notes],
+      `INSERT INTO diagnoses (encounter_id, patient_user_id, doctor_user_id, icd_code, diagnosis_text, diagnosis_type, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.params.id, patient_user_id, doctor_user_id, icd_code, diagnosis_text, diagnosis_type, notes],
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -191,11 +191,9 @@ export const getEncounterFull = async (req: Request, res: Response, next: NextFu
               d.specialization AS doctor_specialization,
               dept.name AS department_name
       FROM encounters e
-      JOIN doctors d ON d.employee_id = e.doctor_id AND d.branch_id = e.doctor_branch_id
+        JOIN doctors d ON d.user_id = e.doctor_user_id
        LEFT JOIN users u ON u.id = d.user_id
-       LEFT JOIN departments dept ON dept.id = (
-           SELECT department_id FROM appointments WHERE id = e.appointment_id LIMIT 1
-       )
+         LEFT JOIN departments dept ON dept.id = d.department_id
        WHERE e.id = $1`,
       [encounterId],
     );
@@ -224,7 +222,7 @@ export const getEncounterFull = async (req: Request, res: Response, next: NextFu
       query(
         `SELECT diag.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
          FROM diagnoses diag
-         JOIN doctors d ON d.employee_id = diag.doctor_id AND d.branch_id = diag.doctor_branch_id
+         JOIN doctors d ON d.user_id = diag.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          WHERE diag.encounter_id = $1
          ORDER BY diag.diagnosed_date ASC`,
@@ -255,7 +253,7 @@ export const getEncounterFull = async (req: Request, res: Response, next: NextFu
                   ) ORDER BY pi.id
                 ) FILTER (WHERE pi.id IS NOT NULL) AS items
          FROM prescriptions p
-         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
+         JOIN doctors d ON d.user_id = p.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
          WHERE p.encounter_id = $1
@@ -362,7 +360,7 @@ async function runSmartQuery(
 
     if (encounterId) {
       const encRes = await query(
-        `SELECT id, appointment_id, patient_id, doctor_id FROM encounters WHERE id = $1`,
+        `SELECT id, appointment_id, patient_user_id, doctor_user_id FROM encounters WHERE id = $1`,
         [encounterId],
       );
       if (encRes.rows.length === 0) {
@@ -370,11 +368,11 @@ async function runSmartQuery(
         return;
       }
       resolvedAppointmentId = encRes.rows[0].appointment_id;
-      patientId = encRes.rows[0].patient_id;
-      doctorId  = encRes.rows[0].doctor_id;
+      patientId = encRes.rows[0].patient_user_id;
+      doctorId  = encRes.rows[0].doctor_user_id;
     } else if (appointmentId) {
       const apptRes = await query(
-        `SELECT a.id, a.patient_id, a.doctor_id,
+        `SELECT a.id, a.patient_user_id, a.doctor_user_id,
                 e.id AS encounter_id
          FROM appointments a
          LEFT JOIN encounters e ON e.appointment_id = a.id
@@ -387,8 +385,8 @@ async function runSmartQuery(
         res.status(404).json({ success: false, message: 'Appointment not found' });
         return;
       }
-      patientId            = apptRes.rows[0].patient_id;
-      doctorId             = apptRes.rows[0].doctor_id;
+      patientId            = apptRes.rows[0].patient_user_id;
+      doctorId             = apptRes.rows[0].doctor_user_id;
       resolvedEncounterId  = apptRes.rows[0].encounter_id ?? null;
     } else {
       res.status(400).json({ success: false, message: 'encounter_id or appointment_id is required' });
@@ -455,8 +453,8 @@ async function runSmartQuery(
       data: {
         encounter_id:     resolvedEncounterId,
         appointment_id:   resolvedAppointmentId,
-        patient_id:       patientId,
-        doctor_id:        doctorId,
+        patient_user_id:  patientId,
+        doctor_user_id:   doctorId,
         fields,
         call_summary_raw: callSummaryRes.rows[0]?.content ?? null,
         doctor_notes_raw: (doctorNotesRes.rows as { content: string }[]).map(r => r.content).join('\n\n') || null,

@@ -10,6 +10,14 @@ const getBranchIdFromRequest = (req: Request): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const getDoctorUserId = async (employeeId: number, branchId: number): Promise<number | null> => {
+  const result = await query(
+    `SELECT user_id FROM doctors WHERE employee_id = $1 AND branch_id = $2 LIMIT 1`,
+    [employeeId, branchId],
+  );
+  return result.rows[0]?.user_id ?? null;
+};
+
 const canDoctorManageProfile = async (req: AuthRequest, doctorId: number, doctorBranchId: number): Promise<boolean> => {
   if (!req.user) return false;
   if (req.user.roleName === 'admin') return true;
@@ -98,6 +106,24 @@ export const getDoctorById = async (req: Request, res: Response, next: NextFunct
       return;
     }
 
+    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
+    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
+    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
     const result = await query(
       `SELECT d.*, d.employee_id AS id,
               COALESCE(u.first_name, d.first_name) AS first_name,
@@ -161,8 +187,6 @@ export const createDoctor = async (req: Request, res: Response, next: NextFuncti
       experience_years, consultation_fee, bio, branch_id, account_status,
     } = req.body;
 
-    const reqUser = (req as Request & { user?: { organizationId?: number } }).user;
-
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -177,39 +201,23 @@ export const createDoctor = async (req: Request, res: Response, next: NextFuncti
       );
       const userId = userRes.rows[0].id;
 
-      const bodyOrgId = (req.body.organization_id ?? null) as number | null;
-      let orgId = reqUser?.organizationId ?? bodyOrgId;
-      let branchId = branch_id ?? null;
-      if (!branchId && orgId) {
-        const branchRes = await client.query(
-          `SELECT id FROM branches WHERE organization_id = $1 AND branch_seq = 1 LIMIT 1`,
-          [orgId],
-        );
-        if (branchRes.rows.length > 0) branchId = branchRes.rows[0].id;
-      }
-      if (!orgId && branchId) {
-        const orgRes = await client.query(
-          `SELECT organization_id FROM branches WHERE id = $1 LIMIT 1`,
-          [branchId],
-        );
-        if (orgRes.rows.length > 0) orgId = orgRes.rows[0].organization_id;
-      }
+      const branchId = branch_id ?? null;
       if (!branchId) {
-        res.status(400).json({ success: false, message: 'branch_id or organization_id is required' });
+        res.status(400).json({ success: false, message: 'branch_id is required' });
         return;
       }
       const status = account_status ?? 'unclaimed';
 
       const docRes = await client.query(
         `INSERT INTO doctors
-           (user_id, organization_id, branch_id, account_status,
+           (user_id, branch_id, account_status,
             first_name, last_name, email, phone, gender, date_of_birth,
             department_id, specialization, license_number, qualification,
             experience_years, consultation_fee, bio)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
          RETURNING *`,
         [
-          userId, orgId, branchId, status,
+          userId, branchId, status,
           first_name, last_name, email, phone, gender ?? null, date_of_birth ?? null,
           department_id ?? null, specialization ?? null, license_number ?? null, qualification ?? null,
           experience_years ?? null, consultation_fee ?? null, bio ?? null,
@@ -276,10 +284,10 @@ export const getDoctorAppointments = async (req: Request, res: Response, next: N
       `SELECT a.*, CONCAT(p.first_name,' ',p.last_name) AS patient_name,
               p.patient_code, p.phone AS patient_phone
        FROM appointments a
-       JOIN patients p ON p.id = a.patient_id
-       WHERE a.doctor_id = $1 AND a.doctor_branch_id = $2 AND a.appointment_date = $3
+        JOIN patients p ON p.user_id = a.patient_user_id
+        WHERE a.doctor_user_id = $1 AND a.doctor_branch_id = $2 AND a.appointment_date = $3
        ORDER BY a.appointment_time ASC`,
-      [req.params.id, branchId, date],
+            [doctorUserId, branchId, date],
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
@@ -327,7 +335,7 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
     const [dataRes, countRes] = await Promise.all([
       query(
           `SELECT
-            d.employee_id AS id, d.branch_id, d.specialization, d.qualification, d.experience_years,
+            d.employee_id AS id, d.user_id AS doctor_user_id, d.branch_id, d.specialization, d.qualification, d.experience_years,
            d.consultation_fee, d.is_active,
            COALESCE(u.first_name, d.first_name) AS first_name,
            COALESCE(u.last_name,  d.last_name)  AS last_name,
@@ -347,23 +355,23 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
     ]);
 
     // Fetch all available schedules for matched doctors
-    const doctorPairs: Array<[number, number]> = dataRes.rows.map((r: { id: number; branch_id: number }) => [r.id, r.branch_id]);
+    const doctorPairs: Array<[number, number]> = dataRes.rows.map((r: { doctor_user_id: number; branch_id: number }) => [r.doctor_user_id, r.branch_id]);
     let scheduleMap: Record<string, unknown[]> = {};
 
     if (doctorPairs.length > 0) {
       const pairPlaceholders = doctorPairs.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
       const schedParams = doctorPairs.flat();
       const schedRes = await query(
-        `SELECT id, doctor_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments
+        `SELECT id, doctor_user_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments
          FROM doctor_schedules
-         WHERE (doctor_id, doctor_branch_id) IN (${pairPlaceholders})
+         WHERE (doctor_user_id, doctor_branch_id) IN (${pairPlaceholders})
            AND is_available = true
          ORDER BY day_of_week, start_time`,
         schedParams,
       );
 
-      for (const row of schedRes.rows as Array<{ doctor_id: number; doctor_branch_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
-        const key = `${row.doctor_id}:${row.doctor_branch_id}`;
+      for (const row of schedRes.rows as Array<{ doctor_user_id: number; doctor_branch_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
+        const key = `${row.doctor_user_id}:${row.doctor_branch_id}`;
         if (!scheduleMap[key]) scheduleMap[key] = [];
         scheduleMap[key].push({
           schedule_id:      row.id,
@@ -380,8 +388,8 @@ export const searchDoctors = async (req: Request, res: Response, next: NextFunct
     const total = parseInt(countRes.rows[0].count, 10);
     res.json({
       success: true,
-      data: dataRes.rows.map((doc: { id: number; branch_id: number }) => {
-        const key = `${doc.id}:${doc.branch_id}`;
+      data: dataRes.rows.map((doc: { doctor_user_id: number; branch_id: number }) => {
+        const key = `${doc.doctor_user_id}:${doc.branch_id}`;
         return {
           ...doc,
           available_schedules: scheduleMap[key] || [],
@@ -436,7 +444,7 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     if (dayOfWeekList.length > 0) {
       const clause = `EXISTS (
         SELECT 1 FROM doctor_schedules ds
-        WHERE ds.doctor_id = d.employee_id
+        WHERE ds.doctor_user_id = d.user_id
           AND ds.doctor_branch_id = d.branch_id
           AND ds.is_available = true
           AND ds.day_of_week = ANY($${dataIdx}::text[])
@@ -447,7 +455,7 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
 
       const cClause = `EXISTS (
         SELECT 1 FROM doctor_schedules ds
-        WHERE ds.doctor_id = d.employee_id
+        WHERE ds.doctor_user_id = d.user_id
           AND ds.doctor_branch_id = d.branch_id
           AND ds.is_available = true
           AND ds.day_of_week = ANY($${countIdx}::text[])
@@ -506,7 +514,7 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     const [dataRes, countRes] = await Promise.all([
       query(
           `SELECT
-            d.employee_id AS id, d.branch_id, d.specialization, d.qualification, d.experience_years,
+            d.employee_id AS id, d.user_id AS doctor_user_id, d.branch_id, d.specialization, d.qualification, d.experience_years,
            d.consultation_fee, d.is_active,
            COALESCE(u.first_name, d.first_name) AS first_name,
            COALESCE(u.last_name,  d.last_name)  AS last_name,
@@ -523,7 +531,7 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     ]);
 
     // Fetch schedules for all matched doctors on the requested days
-    const doctorPairs: Array<[number, number]> = dataRes.rows.map((r: { id: number; branch_id: number }) => [r.id, r.branch_id]);
+    const doctorPairs: Array<[number, number]> = dataRes.rows.map((r: { doctor_user_id: number; branch_id: number }) => [r.doctor_user_id, r.branch_id]);
     let scheduleMap: Record<string, unknown[]> = {};
 
     if (doctorPairs.length > 0 && dayOfWeekList.length > 0) {
@@ -532,17 +540,17 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
       const dayParamIdx = schedParams.length;
 
       const schedRes = await query(
-        `SELECT id, doctor_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments
+        `SELECT id, doctor_user_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments
          FROM doctor_schedules
-         WHERE (doctor_id, doctor_branch_id) IN (${pairPlaceholders})
+         WHERE (doctor_user_id, doctor_branch_id) IN (${pairPlaceholders})
            AND is_available = true
            AND day_of_week = ANY($${dayParamIdx}::text[])
          ORDER BY day_of_week, start_time`,
         schedParams,
       );
 
-      for (const row of schedRes.rows as Array<{ doctor_id: number; doctor_branch_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
-        const key = `${row.doctor_id}:${row.doctor_branch_id}`;
+      for (const row of schedRes.rows as Array<{ doctor_user_id: number; doctor_branch_id: number; day_of_week: string; start_time: string; end_time: string; appointment_type: string; max_appointments: number; id: number }>) {
+        const key = `${row.doctor_user_id}:${row.doctor_branch_id}`;
         if (!scheduleMap[key]) scheduleMap[key] = [];
         // Find the matching dates for this day_of_week
         const matchingDates = dateList.filter(d => dateToDayMap[d] === row.day_of_week);
@@ -559,8 +567,8 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
     }
 
     const total = parseInt(countRes.rows[0].count, 10);
-    const doctors = dataRes.rows.map((doc: { id: number; branch_id: number }) => {
-      const key = `${doc.id}:${doc.branch_id}`;
+    const doctors = dataRes.rows.map((doc: { doctor_user_id: number; branch_id: number }) => {
+      const key = `${doc.doctor_user_id}:${doc.branch_id}`;
       return {
         ...doc,
         available_schedules: scheduleMap[key] || [],
@@ -627,10 +635,10 @@ export const getDoctorScheduleByDate = async (req: Request, res: Response, next:
     }
 
     const result = await query(
-      `SELECT id, doctor_id, day_of_week, appointment_type,
+      `SELECT id, doctor_user_id, day_of_week, appointment_type,
               start_time, end_time, max_appointments, is_available
        FROM doctor_schedules
-       WHERE doctor_id = $1 AND doctor_branch_id = $2
+        WHERE doctor_user_id = $1 AND doctor_branch_id = $2
        ORDER BY
          CASE day_of_week
            WHEN 'Monday'    THEN 1
@@ -642,13 +650,14 @@ export const getDoctorScheduleByDate = async (req: Request, res: Response, next:
            WHEN 'Sunday'    THEN 7
          END,
          start_time ASC`,
-      [req.params.id, branchId],
+      [doctorUserId, branchId],
     );
 
     res.json({
       success: true,
       data: {
         doctor_id: Number(req.params.id),
+        doctor_user_id: doctorUserId,
         doctor_branch_id: branchId,
         schedules: result.rows,
       },
@@ -759,6 +768,12 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
       return;
     }
 
+    const doctorUserId = await getDoctorUserId(doctorId, branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
     const { schedules } = req.body;
     const entries = Array.isArray(schedules) ? schedules : [];
     if (entries.length === 0) {
@@ -804,10 +819,10 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
 
       const upsert = await query(
         `INSERT INTO doctor_schedules
-           (doctor_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments, is_available)
+           (doctor_user_id, doctor_branch_id, day_of_week, appointment_type, start_time, end_time, max_appointments, is_available)
          VALUES ($1, $2, $3, $4, $5, $6, $7, true)
          RETURNING *`,
-        [doctorId, branchId, normalizedDay, mappedType, start_time, end_time, maxAppointments],
+        [doctorUserId, branchId, normalizedDay, mappedType, start_time, end_time, maxAppointments],
       );
 
       updatedRows.push(upsert.rows[0]);
@@ -818,6 +833,7 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
       message: 'Doctor schedule saved successfully',
       data: {
         doctor_id: doctorId,
+        doctor_user_id: doctorUserId,
         doctor_branch_id: branchId,
         schedules: updatedRows,
       },
@@ -836,6 +852,11 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
       res.status(400).json({ success: false, message: 'branch_id is required' });
       return;
     }
+    const doctorUserId = await getDoctorUserId(Number(doctorId), branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
 
     const d = new Date(`${date}T00:00:00`);
@@ -846,15 +867,15 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
       query(
         `SELECT id, appointment_type, start_time, end_time
          FROM doctor_schedules
-         WHERE doctor_id = $1 AND doctor_branch_id = $2 AND day_of_week = $3 AND is_available = true`,
-        [doctorId, branchId, dayOfWeek],
+         WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND day_of_week = $3 AND is_available = true`,
+        [doctorUserId, branchId, dayOfWeek],
       ),
       query(
         `SELECT appointment_time
          FROM appointments
-         WHERE doctor_id = $1 AND doctor_branch_id = $2 AND appointment_date = $3
+         WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND appointment_date = $3
            AND status NOT IN ('cancelled', 'no_show')`,
-        [doctorId, branchId, date],
+        [doctorUserId, branchId, date],
       ),
     ]);
 
@@ -883,7 +904,7 @@ export const getDoctorAvailableSlots = async (req: Request, res: Response, next:
 
     res.json({
       success: true,
-      data: { doctor_id: Number(doctorId), doctor_branch_id: branchId, date, day_of_week: dayOfWeek, available_slots: availableSlots },
+      data: { doctor_id: Number(doctorId), doctor_user_id: doctorUserId, doctor_branch_id: branchId, date, day_of_week: dayOfWeek, available_slots: availableSlots },
     });
   } catch (err) {
     next(err);
@@ -901,10 +922,9 @@ export const updateDoctorSchedule = async (req: AuthRequest, res: Response, next
       return;
     }
 
-    const doctorId = scheduleRes.rows[0].doctor_id;
-    const doctorBranchId = scheduleRes.rows[0].doctor_branch_id;
-    const allowed = await canDoctorManageProfile(req, doctorId, doctorBranchId);
-    if (!allowed) {
+    const doctorUserId = scheduleRes.rows[0].doctor_user_id;
+    const isAdmin = req.user?.roleName === 'admin' || req.user?.roleName === 'super_admin';
+    if (!isAdmin && req.user?.userId !== doctorUserId) {
       res.status(403).json({ success: false, message: 'You can only update your own schedule' });
       return;
     }
@@ -961,10 +981,9 @@ export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next
       return;
     }
 
-    const doctorId = scheduleRes.rows[0].doctor_id;
-    const doctorBranchId = scheduleRes.rows[0].doctor_branch_id;
-    const allowed = await canDoctorManageProfile(req, doctorId, doctorBranchId);
-    if (!allowed) {
+    const doctorUserId = scheduleRes.rows[0].doctor_user_id;
+    const isAdmin = req.user?.roleName === 'admin' || req.user?.roleName === 'super_admin';
+    if (!isAdmin && req.user?.userId !== doctorUserId) {
       res.status(403).json({ success: false, message: 'You can only delete your own schedule' });
       return;
     }
@@ -989,21 +1008,21 @@ export const getDoctorBookedAppointments = async (req: Request, res: Response, n
     const result = await query(
       `SELECT a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
               a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason,
-              p.id AS patient_id,
+              p.user_id AS patient_user_id,
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.patient_code, p.phone AS patient_phone
        FROM appointments a
-       JOIN patients p ON p.id = a.patient_id
+       JOIN patients p ON p.user_id = a.patient_user_id
        LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
-       WHERE a.doctor_id = $1
+       WHERE a.doctor_user_id = $1
          AND a.doctor_branch_id = $2
          AND a.appointment_date = $3
          AND a.status NOT IN ('cancelled', 'no_show')
        ORDER BY a.appointment_time ASC`,
-      [req.params.id, branchId, date],
+      [doctorUserId, branchId, date],
     );
 
-    res.json({ success: true, data: { doctor_id: Number(req.params.id), doctor_branch_id: branchId, date, appointments: result.rows } });
+    res.json({ success: true, data: { doctor_id: Number(req.params.id), doctor_user_id: doctorUserId, doctor_branch_id: branchId, date, appointments: result.rows } });
   } catch (err) {
     next(err);
   }

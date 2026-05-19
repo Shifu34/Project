@@ -1,17 +1,32 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getClient } from '../config/database';
-import { AuthRequest } from '../middleware/auth.middleware';
 
 // GET /organizations  — super_admin only, list all orgs with stats
 export const getOrganizations = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const result = await query(
       `SELECT o.*,
-              (SELECT COUNT(*) FROM users      WHERE organization_id = o.id AND role_id != (SELECT id FROM roles WHERE name='super_admin')) AS user_count,
-              (SELECT COUNT(*) FROM doctors    WHERE organization_id = o.id) AS doctor_count,
-              (SELECT COUNT(*) FROM patients   WHERE organization_id = o.id) AS patient_count,
-              (SELECT COUNT(*) FROM appointments WHERE organization_id = o.id) AS appointment_count
+            (SELECT COUNT(DISTINCT user_id) FROM (
+              SELECT d.user_id AS user_id
+              FROM doctors d
+              JOIN branches b ON b.id = d.branch_id
+              WHERE b.organization_id = o.id
+              UNION
+              SELECT a.patient_user_id AS user_id
+              FROM appointments a
+              JOIN branches b ON b.id = a.doctor_branch_id
+              WHERE b.organization_id = o.id
+            ) u) AS user_count,
+            (SELECT COUNT(*) FROM doctors d
+              JOIN branches b ON b.id = d.branch_id
+              WHERE b.organization_id = o.id) AS doctor_count,
+            (SELECT COUNT(DISTINCT a.patient_user_id) FROM appointments a
+              JOIN branches b ON b.id = a.doctor_branch_id
+              WHERE b.organization_id = o.id) AS patient_count,
+            (SELECT COUNT(*) FROM appointments a
+              JOIN branches b ON b.id = a.doctor_branch_id
+              WHERE b.organization_id = o.id) AS appointment_count
        FROM organizations o
        ORDER BY o.created_at DESC`,
       [],
@@ -27,9 +42,15 @@ export const getOrganizationById = async (req: Request, res: Response, next: Nex
   try {
     const result = await query(
       `SELECT o.*,
-              (SELECT COUNT(*) FROM doctors    WHERE organization_id = o.id) AS doctor_count,
-              (SELECT COUNT(*) FROM patients   WHERE organization_id = o.id) AS patient_count,
-              (SELECT COUNT(*) FROM appointments WHERE organization_id = o.id) AS appointment_count
+            (SELECT COUNT(*) FROM doctors d
+              JOIN branches b ON b.id = d.branch_id
+              WHERE b.organization_id = o.id) AS doctor_count,
+            (SELECT COUNT(DISTINCT a.patient_user_id) FROM appointments a
+              JOIN branches b ON b.id = a.doctor_branch_id
+              WHERE b.organization_id = o.id) AS patient_count,
+            (SELECT COUNT(*) FROM appointments a
+              JOIN branches b ON b.id = a.doctor_branch_id
+              WHERE b.organization_id = o.id) AS appointment_count
        FROM organizations o
        WHERE o.id = $1`,
       [req.params.id],
@@ -68,10 +89,10 @@ export const createOrganization = async (req: Request, res: Response, next: Next
     // Create the org admin user
     const hash = await bcrypt.hash(admin_password || 'Admin@12345', 12);
     const userRes = await client.query(
-      `INSERT INTO users (role_id, first_name, last_name, email, password_hash, is_active, organization_id, created_at, updated_at)
-       VALUES ((SELECT id FROM roles WHERE name='admin'), $1, $2, $3, $4, true, $5, NOW(), NOW())
+      `INSERT INTO users (role_id, first_name, last_name, email, password_hash, is_active, created_at, updated_at)
+       VALUES ((SELECT id FROM roles WHERE name='admin'), $1, $2, $3, $4, true, NOW(), NOW())
        RETURNING id, email, first_name, last_name`,
-      [admin_first_name, admin_last_name, admin_email, hash, org.id],
+      [admin_first_name, admin_last_name, admin_email, hash],
     );
 
     await client.query('COMMIT');
@@ -137,16 +158,31 @@ export const getOrganizationStats = async (req: Request, res: Response, next: Ne
            COUNT(*) FILTER (WHERE status != 'payment_timeout') AS total,
            COUNT(*) FILTER (WHERE status IN ('confirmed','pending','completed')) AS paid,
            COUNT(*) FILTER (WHERE status = 'payment_timeout')                  AS unpaid
-         FROM appointments a WHERE organization_id = $1`,
+         FROM appointments a
+         JOIN branches b ON b.id = a.doctor_branch_id
+         WHERE b.organization_id = $1`,
         [orgId],
       ),
-      query('SELECT COUNT(*) AS total FROM patients WHERE organization_id = $1', [orgId]),
-      query('SELECT COUNT(*) AS total FROM doctors  WHERE organization_id = $1', [orgId]),
+      query(
+        `SELECT COUNT(DISTINCT a.patient_user_id) AS total
+         FROM appointments a
+         JOIN branches b ON b.id = a.doctor_branch_id
+         WHERE b.organization_id = $1`,
+        [orgId],
+      ),
+      query(
+        `SELECT COUNT(*) AS total
+         FROM doctors d
+         JOIN branches b ON b.id = d.branch_id
+         WHERE b.organization_id = $1`,
+        [orgId],
+      ),
       query(
         `SELECT COALESCE(SUM(py.amount), 0) AS total_revenue
          FROM payments py
          JOIN appointments a ON a.id = py.appointment_id
-         WHERE a.organization_id = $1 AND py.payment_status = 'completed'`,
+         JOIN branches b ON b.id = a.doctor_branch_id
+         WHERE b.organization_id = $1 AND py.payment_status = 'completed'`,
         [orgId],
       ),
     ]);
@@ -168,12 +204,18 @@ export const getOrganizationStats = async (req: Request, res: Response, next: Ne
 // GET /organizations/me  — org admin sees their own org
 export const getMyOrganization = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const orgId = (req as AuthRequest).user?.organizationId;
-    if (!orgId) {
-      res.status(404).json({ success: false, message: 'No organization associated with this account' });
+    const branchId = Number((req.query.branch_id as string) || '');
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id query param is required' });
       return;
     }
-    const result = await query('SELECT * FROM organizations WHERE id = $1', [orgId]);
+    const result = await query(
+      `SELECT o.*
+       FROM organizations o
+       JOIN branches b ON b.organization_id = o.id
+       WHERE b.id = $1`,
+      [branchId],
+    );
     if (result.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Organization not found' });
       return;

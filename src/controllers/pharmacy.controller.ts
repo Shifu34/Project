@@ -7,7 +7,7 @@ export const getInventory = async (req: Request, res: Response, next: NextFuncti
     const page   = Math.max(1, parseInt(req.query.page  as string || '1',  10));
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const search = (req.query.search as string || '').trim();
-    const orgId  = req.query.organization_id ? Number(req.query.organization_id) : null;
+    const branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
     const offset = (page - 1) * limit;
 
     const conditions: string[] = [];
@@ -17,9 +17,9 @@ export const getInventory = async (req: Request, res: Response, next: NextFuncti
       filterParams.push(`%${search}%`);
       conditions.push(`(name ILIKE $${filterParams.length} OR generic_name ILIKE $${filterParams.length})`);
     }
-    if (orgId !== null) {
-      filterParams.push(orgId);
-      conditions.push(`organization_id = $${filterParams.length}`);
+    if (branchId !== null) {
+      filterParams.push(branchId);
+      conditions.push(`branch_id = $${filterParams.length}`);
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -47,14 +47,18 @@ export const addInventory = async (req: Request, res: Response, next: NextFuncti
       description, reorder_level, quantity_available, is_controlled,
     } = req.body;
 
-    const orgId = (req as Request & { user?: { organizationId?: number } }).user?.organizationId;
+    const branchId = (req.body.branch_id ?? null) as number | null;
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
 
     const result = await query(
       `INSERT INTO inventory_items
-         (organization_id, name, generic_name, category, dosage_form, strength, unit,
+        (branch_id, name, generic_name, category, dosage_form, strength, unit,
           description, reorder_level, quantity_available, is_controlled)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [orgId, name, generic_name, category, dosage_form, strength, unit,
+      [branchId, name, generic_name, category, dosage_form, strength, unit,
        description, reorder_level ?? 10, quantity_available ?? 0, is_controlled ?? false],
     );
 
@@ -190,15 +194,15 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
 export const createInventoryOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const client = await getClient();
   try {
-    const { patient_id, inventory_item_id, quantity, unit_price, notes } = req.body;
-    const orderedBy = (req as Request & { user?: { userId: number; organizationId?: number } }).user?.userId;
-    const organizationId = (req as Request & { user?: { userId: number; organizationId?: number } }).user?.organizationId ?? null;
+    const { patient_user_id, inventory_item_id, quantity, unit_price, notes } = req.body;
+    const orderedBy = (req as Request & { user?: { userId: number } }).user?.userId;
 
     await client.query('BEGIN');
 
     // Check stock
     const stockRes = await client.query(
-      `SELECT quantity_available, name FROM inventory_items WHERE id = $1 AND is_active = true FOR UPDATE`,
+      `SELECT quantity_available, name, branch_id
+       FROM inventory_items WHERE id = $1 AND is_active = true FOR UPDATE`,
       [inventory_item_id],
     );
     if (stockRes.rows.length === 0) {
@@ -213,12 +217,13 @@ export const createInventoryOrder = async (req: Request, res: Response, next: Ne
     }
 
     const totalAmount = Number(unit_price) * Number(quantity);
+    const branchId = stockRes.rows[0].branch_id as number;
 
     const orderRes = await client.query(
       `INSERT INTO inventory_orders
-         (patient_id, inventory_item_id, organization_id, quantity, unit_price, total_amount, notes, ordered_by)
+         (patient_user_id, inventory_item_id, branch_id, quantity, unit_price, total_amount, notes, order_by_doctor_user_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [patient_id, inventory_item_id, organizationId, quantity, unit_price, totalAmount, notes ?? null, orderedBy],
+      [patient_user_id, inventory_item_id, branchId, quantity, unit_price, totalAmount, notes ?? null, orderedBy],
     );
 
     // Deduct stock via inventory_transactions
@@ -240,7 +245,7 @@ export const createInventoryOrder = async (req: Request, res: Response, next: Ne
 };
 
 // GET /pharmacy/orders
-// Supports ?patient_id, ?organization_id, ?status, ?page, ?limit
+// Supports ?patient_user_id, ?branch_id, ?status, ?page, ?limit
 export const getInventoryOrders = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const page   = Math.max(1, Number(req.query.page)  || 1);
@@ -250,8 +255,8 @@ export const getInventoryOrders = async (req: Request, res: Response, next: Next
     const filters: string[] = [];
     const params: unknown[]  = [];
 
-    if (req.query.patient_id)      { params.push(req.query.patient_id);      filters.push(`io.patient_id = $${params.length}`); }
-    if (req.query.organization_id) { params.push(req.query.organization_id); filters.push(`io.organization_id = $${params.length}`); }
+    if (req.query.patient_user_id) { params.push(req.query.patient_user_id); filters.push(`io.patient_user_id = $${params.length}`); }
+    if (req.query.branch_id)       { params.push(req.query.branch_id);       filters.push(`io.branch_id = $${params.length}`); }
     if (req.query.status)          { params.push(req.query.status);           filters.push(`io.status = $${params.length}`); }
 
     const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
@@ -262,11 +267,11 @@ export const getInventoryOrders = async (req: Request, res: Response, next: Next
         `SELECT io.*,
                 ii.name AS item_name, ii.unit,
                 p.first_name AS patient_first, p.last_name AS patient_last,
-                o.name AS organization_name
+            b.name AS branch_name, b.branch_code
          FROM inventory_orders io
          JOIN inventory_items ii ON ii.id = io.inventory_item_id
-         JOIN patients p ON p.id = io.patient_id
-         LEFT JOIN organizations o ON o.id = io.organization_id
+          JOIN patients p ON p.user_id = io.patient_user_id
+          LEFT JOIN branches b ON b.id = io.branch_id
          ${where}
          ORDER BY io.created_at DESC
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -308,13 +313,13 @@ export const updateInventoryOrder = async (req: Request, res: Response, next: Ne
 
 // GET /pharmacy/revenue
 // Revenue analytics for inventory orders (completed only), grouped by item or by date
-// Supports ?organization_id, ?from, ?to, ?group_by=item|date|organization
+// Supports ?branch_id, ?from, ?to, ?group_by=item|date|branch
 export const getInventoryRevenue = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const filters: string[] = [`io.status = 'completed'`];
     const params: unknown[]  = [];
 
-    if (req.query.organization_id) { params.push(req.query.organization_id); filters.push(`io.organization_id = $${params.length}`); }
+    if (req.query.branch_id)       { params.push(req.query.branch_id);       filters.push(`io.branch_id = $${params.length}`); }
     if (req.query.from)            { params.push(req.query.from);            filters.push(`io.created_at >= $${params.length}`); }
     if (req.query.to)              { params.push(req.query.to);              filters.push(`io.created_at <= $${params.length}`); }
 
@@ -327,9 +332,9 @@ export const getInventoryRevenue = async (req: Request, res: Response, next: Nex
     if (groupBy === 'date') {
       selectClause = `DATE(io.created_at) AS period, SUM(io.total_amount) AS revenue, SUM(io.quantity) AS units_sold`;
       groupClause  = `GROUP BY DATE(io.created_at) ORDER BY period DESC`;
-    } else if (groupBy === 'organization') {
-      selectClause = `o.id AS organization_id, o.name AS organization_name, SUM(io.total_amount) AS revenue, SUM(io.quantity) AS units_sold, COUNT(*) AS order_count`;
-      groupClause  = `GROUP BY o.id, o.name ORDER BY revenue DESC`;
+    } else if (groupBy === 'branch') {
+      selectClause = `b.id AS branch_id, b.name AS branch_name, b.branch_code, SUM(io.total_amount) AS revenue, SUM(io.quantity) AS units_sold, COUNT(*) AS order_count`;
+      groupClause  = `GROUP BY b.id, b.name, b.branch_code ORDER BY revenue DESC`;
     } else {
       // default: by item
       selectClause = `ii.id AS item_id, ii.name AS item_name, ii.unit, SUM(io.quantity) AS units_sold, SUM(io.total_amount) AS revenue, COUNT(*) AS order_count`;
@@ -348,7 +353,7 @@ export const getInventoryRevenue = async (req: Request, res: Response, next: Nex
         `SELECT ${selectClause}
          FROM inventory_orders io
          JOIN inventory_items ii ON ii.id = io.inventory_item_id
-         LEFT JOIN organizations o ON o.id = io.organization_id
+         LEFT JOIN branches b ON b.id = io.branch_id
          ${where} ${groupClause}`,
         params,
       ),

@@ -1,6 +1,6 @@
 -- =============================================================
 -- Murshid Hospital System - PostgreSQL Database Schema
--- Total: 34 tables
+-- Total: 50 tables
 -- =============================================================
 
 -- Enable extensions
@@ -18,6 +18,7 @@ CREATE TABLE organizations (
     phone       VARCHAR(20),
     email       VARCHAR(255),
     logo_url    VARCHAR(500),
+    category    VARCHAR(30) CHECK (category IN ('hospital','lab','pharmacy')),
     is_active   BOOLEAN DEFAULT TRUE,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -30,7 +31,7 @@ CREATE TABLE branches (
     id              SERIAL PRIMARY KEY,
     organization_id INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     branch_seq      INT NOT NULL,
-    branch_code     TEXT NOT NULL, -- e.g. "1.1" (org_id.branch_seq)
+    branch_code     TEXT NOT NULL,
     name            VARCHAR(150) NOT NULL,
     location        VARCHAR(255) NOT NULL,
     phone           VARCHAR(50),
@@ -108,7 +109,7 @@ CREATE TABLE patients (
     occupation                 VARCHAR(100),
     nationality                VARCHAR(100),
     cnic                       VARCHAR(15),
-    source_pid                 INT,          -- legacy source system PID (migration only)
+    source_pid                 INT,
     user_id                    INT REFERENCES users(id) ON DELETE SET NULL,
     status                     VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active','inactive','deceased')),
     registered_by              INT REFERENCES users(id) ON DELETE SET NULL,
@@ -154,7 +155,7 @@ CREATE TABLE insurance_providers (
 -- =============================================================
 CREATE TABLE user_insurances (
     id                    SERIAL PRIMARY KEY,
-    patient_id            INT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    patient_user_id       INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     insurance_provider_id INT NOT NULL REFERENCES insurance_providers(id),
     policy_number         VARCHAR(100) NOT NULL,
     group_number          VARCHAR(100),
@@ -171,31 +172,29 @@ CREATE TABLE user_insurances (
 -- 8. DEPARTMENTS
 -- =============================================================
 CREATE TABLE departments (
-    id              SERIAL PRIMARY KEY,
-    organization_id INT REFERENCES organizations(id) ON DELETE SET NULL,
-    name            VARCHAR(100) NOT NULL UNIQUE,
-    description     TEXT,
-    head_doctor_id  INT,
-    head_doctor_branch_id INT,
-    phone           VARCHAR(20),
-    location        VARCHAR(100),
-    is_active       BOOLEAN DEFAULT TRUE,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id           SERIAL PRIMARY KEY,
+    branch_id    INT REFERENCES branches(id) ON DELETE SET NULL,
+    name         VARCHAR(100) NOT NULL UNIQUE,
+    description  TEXT,
+    head_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+    phone        VARCHAR(20),
+    location     VARCHAR(100),
+    is_active    BOOLEAN DEFAULT TRUE,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =============================================================
 -- 9. DOCTORS
 -- =============================================================
 CREATE TABLE doctors (
+    id               SERIAL UNIQUE,
     employee_id      SERIAL,
     user_id          INT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
-    organization_id  INT REFERENCES organizations(id) ON DELETE SET NULL,
     branch_id        INT NOT NULL REFERENCES branches(id) ON DELETE SET NULL,
     account_status   VARCHAR(20) NOT NULL DEFAULT 'unclaimed'
                          CHECK (account_status IN ('unclaimed','claim_pending','active','rejected','suspended','inactive')),
     department_id    INT REFERENCES departments(id) ON DELETE SET NULL,
-    -- Personal info stored directly so migrated doctors (user_id=NULL) still have names/contact
     first_name       VARCHAR(100),
     last_name        VARCHAR(100),
     email            VARCHAR(255),
@@ -214,28 +213,15 @@ CREATE TABLE doctors (
     PRIMARY KEY (employee_id, branch_id)
 );
 
--- Partial unique index: allows multiple NULL license_numbers (migrated doctors without pid)
 CREATE UNIQUE INDEX doctors_license_nr_uidx ON doctors (license_number) WHERE license_number IS NOT NULL;
-
-ALTER TABLE departments
-    ADD CONSTRAINT departments_head_doctor_fkey
-    FOREIGN KEY (head_doctor_id, head_doctor_branch_id)
-    REFERENCES doctors(employee_id, branch_id) ON DELETE SET NULL;
-
 
 -- =============================================================
 -- 10. DOCTOR_SCHEDULES
 -- =============================================================
--- NOTE: Original schema had UNIQUE (doctor_id, day_of_week, appointment_type).
---       Altered 2026-03-18: dropped that constraint, added UNIQUE (doctor_id, day_of_week, appointment_type, start_time).
---       Altered 2026-03-24: dropped all unique constraints to allow multiple
---       slots per day/type (each slot is its own independent row).
--- Migration (run once on existing DB):
-ALTER TABLE doctor_schedules DROP CONSTRAINT IF EXISTS doctor_schedules_doctor_day_type_key;
-CREATE TABLE IF NOT EXISTS doctor_schedules (
+CREATE TABLE doctor_schedules (
     id               SERIAL PRIMARY KEY,
-    doctor_id        INT NOT NULL,
-    doctor_branch_id INT NOT NULL,
+    doctor_user_id   INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_branch_id INT NOT NULL REFERENCES branches(id) ON DELETE SET NULL,
     day_of_week      VARCHAR(10) NOT NULL
                          CHECK (day_of_week IN ('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')),
     appointment_type VARCHAR(30) NOT NULL DEFAULT 'Online Consultation'
@@ -246,16 +232,12 @@ CREATE TABLE IF NOT EXISTS doctor_schedules (
     is_available     BOOLEAN DEFAULT TRUE,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    -- No unique constraint: multiple slots per day/type are allowed
 );
-ALTER TABLE doctor_schedules
-    ADD CONSTRAINT doctor_schedules_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id) ON DELETE CASCADE;
 
 -- =============================================================
 -- 11. NATURE_OF_VISIT
 -- =============================================================
-CREATE TABLE IF NOT EXISTS nature_of_visit (
+CREATE TABLE nature_of_visit (
     id          SERIAL PRIMARY KEY,
     name        VARCHAR(100) NOT NULL UNIQUE,
     description TEXT,
@@ -268,18 +250,17 @@ CREATE TABLE IF NOT EXISTS nature_of_visit (
 -- =============================================================
 CREATE TABLE appointments (
     id                  SERIAL PRIMARY KEY,
-    patient_id          INT NOT NULL REFERENCES patients(id),
-    doctor_id           INT NOT NULL,
-    doctor_branch_id    INT NOT NULL,
-    department_id       INT REFERENCES departments(id),
+    patient_user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id      INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_branch_id    INT NOT NULL REFERENCES branches(id) ON DELETE SET NULL,
     appointment_date    DATE NOT NULL,
     appointment_time    TIME NOT NULL,
     duration_minutes    INT DEFAULT 30,
     appointment_type    VARCHAR(30) NOT NULL DEFAULT 'Online Consultation'
                             CHECK (appointment_type IN ('In-clinic Visit','Online Consultation')),
-    nature_of_visit_id   INT REFERENCES nature_of_visit(id) ON DELETE SET NULL,
+    nature_of_visit_id  INT REFERENCES nature_of_visit(id) ON DELETE SET NULL,
     status              VARCHAR(20) DEFAULT 'scheduled'
-                            CHECK (status IN ('scheduled','confirmed','in_progress','pending','completed','cancelled','no_show')),
+                            CHECK (status IN ('scheduled','confirmed','in_progress','pending','completed','cancelled','no_show','payment_timeout')),
     reason              TEXT,
     notes               TEXT,
     booked_by           INT REFERENCES users(id) ON DELETE SET NULL,
@@ -288,17 +269,14 @@ CREATE TABLE appointments (
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-ALTER TABLE appointments
-    ADD CONSTRAINT appointments_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
--- 12. PAYMENTS
+-- 13. PAYMENTS
 -- =============================================================
 CREATE TABLE payments (
     id                    SERIAL PRIMARY KEY,
     appointment_id        INT REFERENCES appointments(id) ON DELETE SET NULL,
-    patient_id            INT NOT NULL REFERENCES patients(id),
+    patient_user_id       INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     amount                DECIMAL(12,2) NOT NULL,
     payment_method        VARCHAR(30) CHECK (payment_method IN
                               ('cash','credit_card','debit_card','insurance','bank_transfer','cheque','online')),
@@ -313,7 +291,7 @@ CREATE TABLE payments (
 );
 
 -- =============================================================
--- 13. PAYMENT_REFUNDS
+-- 14. PAYMENT_REFUNDS
 -- =============================================================
 CREATE TABLE payment_refunds (
     id          SERIAL PRIMARY KEY,
@@ -329,14 +307,13 @@ CREATE TABLE payment_refunds (
 );
 
 -- =============================================================
--- 14. ENCOUNTERS
+-- 15. ENCOUNTERS
 -- =============================================================
 CREATE TABLE encounters (
     id                         SERIAL PRIMARY KEY,
     appointment_id             INT UNIQUE REFERENCES appointments(id) ON DELETE SET NULL,
-    patient_id                 INT NOT NULL REFERENCES patients(id),
-    doctor_id                  INT NOT NULL,
-    doctor_branch_id           INT NOT NULL,
+    patient_user_id            INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id             INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     encounter_date             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     encounter_type             VARCHAR(20) CHECK (encounter_type IN
                                    ('outpatient','inpatient','emergency','telemedicine')),
@@ -351,34 +328,27 @@ CREATE TABLE encounters (
     created_at                 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at                 TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-ALTER TABLE encounters
-    ADD CONSTRAINT encounters_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
--- 15. DIAGNOSES
+-- 16. DIAGNOSES
 -- =============================================================
 CREATE TABLE diagnoses (
-    id             SERIAL PRIMARY KEY,
-    encounter_id   INT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
-    patient_id     INT NOT NULL REFERENCES patients(id),
-    doctor_id      INT NOT NULL,
-    doctor_branch_id INT NOT NULL,
-    icd_code       VARCHAR(20),
-    diagnosis_text TEXT NOT NULL,
-    diagnosis_type VARCHAR(20) CHECK (diagnosis_type IN ('primary','secondary','differential')),
-    status         VARCHAR(20) DEFAULT 'active'
-                       CHECK (status IN ('active','resolved','chronic','remission')),
-    diagnosed_date DATE DEFAULT CURRENT_DATE,
-    notes          TEXT,
-    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id              SERIAL PRIMARY KEY,
+    encounter_id    INT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+    patient_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id  INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    icd_code        VARCHAR(20),
+    diagnosis_text  TEXT NOT NULL,
+    diagnosis_type  VARCHAR(20) CHECK (diagnosis_type IN ('primary','secondary','differential')),
+    status          VARCHAR(20) DEFAULT 'active'
+                        CHECK (status IN ('active','resolved','chronic','remission')),
+    diagnosed_date  DATE DEFAULT CURRENT_DATE,
+    notes           TEXT,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-ALTER TABLE diagnoses
-    ADD CONSTRAINT diagnoses_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
--- 16. CLINICAL_NOTES
+-- 17. CLINICAL_NOTES
 -- =============================================================
 CREATE TABLE clinical_notes (
     id           SERIAL PRIMARY KEY,
@@ -393,12 +363,12 @@ CREATE TABLE clinical_notes (
 );
 
 -- =============================================================
--- 17. VITALS
+-- 18. VITALS
 -- =============================================================
 CREATE TABLE vitals (
     id                       SERIAL PRIMARY KEY,
     encounter_id             INT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
-    patient_id               INT NOT NULL REFERENCES patients(id),
+    patient_user_id          INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recorded_by              INT REFERENCES users(id) ON DELETE SET NULL,
     temperature              DECIMAL(4,1),
     blood_pressure_systolic  INT,
@@ -416,14 +386,13 @@ CREATE TABLE vitals (
 );
 
 -- =============================================================
--- 18. PRESCRIPTIONS
+-- 19. PRESCRIPTIONS
 -- =============================================================
 CREATE TABLE prescriptions (
     id                SERIAL PRIMARY KEY,
     encounter_id      INT NOT NULL REFERENCES encounters(id),
-    patient_id        INT NOT NULL REFERENCES patients(id),
-    doctor_id         INT NOT NULL,
-    doctor_branch_id  INT NOT NULL,
+    patient_user_id   INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     prescription_date DATE DEFAULT CURRENT_DATE,
     valid_until       DATE,
     status            VARCHAR(25) DEFAULT 'active'
@@ -432,16 +401,13 @@ CREATE TABLE prescriptions (
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-ALTER TABLE prescriptions
-    ADD CONSTRAINT prescriptions_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
 -- 20. INVENTORY_ITEMS  (created before prescription_items for FK)
 -- =============================================================
 CREATE TABLE inventory_items (
     id                 SERIAL PRIMARY KEY,
-    organization_id    INT REFERENCES organizations(id) ON DELETE SET NULL,
+    branch_id          INT REFERENCES branches(id) ON DELETE SET NULL,
     name               VARCHAR(200) NOT NULL,
     generic_name       VARCHAR(200),
     category           VARCHAR(100),
@@ -458,7 +424,7 @@ CREATE TABLE inventory_items (
 );
 
 -- =============================================================
--- 19. PRESCRIPTION_ITEMS
+-- 21. PRESCRIPTION_ITEMS
 -- =============================================================
 CREATE TABLE prescription_items (
     id                SERIAL PRIMARY KEY,
@@ -476,7 +442,7 @@ CREATE TABLE prescription_items (
 );
 
 -- =============================================================
--- 21. INVENTORY_TRANSACTIONS
+-- 22. INVENTORY_TRANSACTIONS
 -- =============================================================
 CREATE TABLE inventory_transactions (
     id                SERIAL PRIMARY KEY,
@@ -516,17 +482,37 @@ CREATE TRIGGER trg_sync_inventory
     FOR EACH ROW EXECUTE FUNCTION fn_sync_inventory_quantity();
 
 -- =============================================================
--- 22. LAB_TEST_CATALOG
+-- 23. INVENTORY_ORDERS
+-- =============================================================
+CREATE TABLE inventory_orders (
+    id                     SERIAL PRIMARY KEY,
+    patient_user_id        INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    inventory_item_id      INT NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
+    branch_id              INT REFERENCES branches(id) ON DELETE SET NULL,
+    quantity               INT NOT NULL CHECK (quantity > 0),
+    unit_price             DECIMAL(10,2) NOT NULL CHECK (unit_price >= 0),
+    total_amount           DECIMAL(12,2) NOT NULL,
+    status                 VARCHAR(20) NOT NULL DEFAULT 'pending'
+                               CHECK (status IN ('pending','completed','cancelled')),
+    notes                  TEXT,
+    order_by_doctor_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+    created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 24. LAB_TEST_CATALOG
 -- =============================================================
 CREATE TABLE lab_test_catalog (
     id               SERIAL PRIMARY KEY,
+    branch_id        INT REFERENCES branches(id) ON DELETE SET NULL,
     name             VARCHAR(200) NOT NULL,
     code             VARCHAR(50) UNIQUE,
     category         VARCHAR(100),
     description      TEXT,
-    normal_range     TEXT,           -- human-readable display range
-    lo_bound         DECIMAL(12,4),  -- numeric lower bound for interpretation
-    hi_bound         DECIMAL(12,4),  -- numeric upper bound for interpretation
+    normal_range     TEXT,
+    lo_bound         DECIMAL(12,4),
+    hi_bound         DECIMAL(12,4),
     unit             VARCHAR(50),
     price            DECIMAL(10,2),
     turnaround_hours INT,
@@ -535,30 +521,27 @@ CREATE TABLE lab_test_catalog (
 );
 
 -- =============================================================
--- 23. LAB_ORDERS
+-- 25. LAB_ORDERS
 -- =============================================================
 CREATE TABLE lab_orders (
-    id             SERIAL PRIMARY KEY,
-    encounter_id   INT NOT NULL REFERENCES encounters(id),
-    patient_id     INT NOT NULL REFERENCES patients(id),
-    doctor_id      INT NOT NULL,
-    doctor_branch_id INT NOT NULL,
-    ordered_by     INT REFERENCES users(id) ON DELETE SET NULL,
-    order_date     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    priority       VARCHAR(20) DEFAULT 'routine'
-                       CHECK (priority IN ('routine','urgent','stat')),
-    status         VARCHAR(25) DEFAULT 'ordered'
-                       CHECK (status IN ('ordered','sample_collected','processing','completed','cancelled')),
-    clinical_notes TEXT,
-    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id              SERIAL PRIMARY KEY,
+    encounter_id    INT NOT NULL REFERENCES encounters(id),
+    patient_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id  INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_branch_id INT NOT NULL REFERENCES branches(id) ON DELETE SET NULL,
+    ordered_by      INT REFERENCES users(id) ON DELETE SET NULL,
+    order_date      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    priority        VARCHAR(20) DEFAULT 'routine'
+                        CHECK (priority IN ('routine','urgent','stat')),
+    status          VARCHAR(25) DEFAULT 'ordered'
+                        CHECK (status IN ('ordered','sample_collected','processing','completed','cancelled')),
+    clinical_notes  TEXT,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-ALTER TABLE lab_orders
-    ADD CONSTRAINT lab_orders_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
--- 24. LAB_ORDER_ITEMS  (includes results)
+-- 26. LAB_ORDER_ITEMS  (includes results)
 -- =============================================================
 CREATE TABLE lab_order_items (
     id             SERIAL PRIMARY KEY,
@@ -580,10 +563,11 @@ CREATE TABLE lab_order_items (
 );
 
 -- =============================================================
--- 25. RADIOLOGY_TEST_CATALOG
+-- 27. RADIOLOGY_TEST_CATALOG
 -- =============================================================
 CREATE TABLE radiology_test_catalog (
     id               SERIAL PRIMARY KEY,
+    branch_id        INT REFERENCES branches(id) ON DELETE SET NULL,
     name             VARCHAR(200) NOT NULL,
     code             VARCHAR(50) UNIQUE,
     modality         VARCHAR(50)
@@ -596,30 +580,27 @@ CREATE TABLE radiology_test_catalog (
 );
 
 -- =============================================================
--- 26. RADIOLOGY_ORDERS
+-- 28. RADIOLOGY_ORDERS
 -- =============================================================
 CREATE TABLE radiology_orders (
-    id             SERIAL PRIMARY KEY,
-    encounter_id   INT NOT NULL REFERENCES encounters(id),
-    patient_id     INT NOT NULL REFERENCES patients(id),
-    doctor_id      INT NOT NULL,
-    doctor_branch_id INT NOT NULL,
-    ordered_by     INT REFERENCES users(id) ON DELETE SET NULL,
-    order_date     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    priority       VARCHAR(20) DEFAULT 'routine'
-                       CHECK (priority IN ('routine','urgent','stat')),
-    status         VARCHAR(20) DEFAULT 'ordered'
-                       CHECK (status IN ('ordered','scheduled','in_progress','completed','cancelled')),
-    clinical_notes TEXT,
-    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id              SERIAL PRIMARY KEY,
+    encounter_id    INT NOT NULL REFERENCES encounters(id),
+    patient_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id  INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    branch_id       INT NOT NULL REFERENCES branches(id) ON DELETE SET NULL,
+    ordered_by      INT REFERENCES users(id) ON DELETE SET NULL,
+    order_date      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    priority        VARCHAR(20) DEFAULT 'routine'
+                        CHECK (priority IN ('routine','urgent','stat')),
+    status          VARCHAR(20) DEFAULT 'ordered'
+                        CHECK (status IN ('ordered','scheduled','in_progress','completed','cancelled')),
+    clinical_notes  TEXT,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-ALTER TABLE radiology_orders
-    ADD CONSTRAINT radiology_orders_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 
 -- =============================================================
--- 27. RADIOLOGY_ORDER_ITEMS  (includes results)
+-- 29. RADIOLOGY_ORDER_ITEMS  (includes results)
 -- =============================================================
 CREATE TABLE radiology_order_items (
     id                 SERIAL PRIMARY KEY,
@@ -639,7 +620,98 @@ CREATE TABLE radiology_order_items (
 );
 
 -- =============================================================
--- 28. SUBSCRIPTION_PLANS
+-- 30. LAB_STAFF_PROFILES
+-- =============================================================
+CREATE TABLE lab_staff_profiles (
+    id         SERIAL PRIMARY KEY,
+    user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       VARCHAR(255) NOT NULL,
+    phone      VARCHAR(50),
+    email      VARCHAR(255),
+    branch_id  INT REFERENCES branches(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id)
+);
+
+-- =============================================================
+-- 31. LAB_SLOTS
+-- =============================================================
+CREATE TABLE lab_slots (
+    id               SERIAL PRIMARY KEY,
+    lab_staff_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    test_id          INT REFERENCES lab_test_catalog(id) ON DELETE SET NULL,
+    slot_date        DATE NOT NULL,
+    slot_time        TIME NOT NULL,
+    duration_minutes INTEGER NOT NULL DEFAULT 15,
+    max_bookings     INTEGER NOT NULL DEFAULT 1,
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+    branch_id        INT REFERENCES branches(id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 32. LAB_SLOT_TESTS
+-- =============================================================
+CREATE TABLE lab_slot_tests (
+    id          SERIAL PRIMARY KEY,
+    lab_slot_id INT NOT NULL REFERENCES lab_slots(id) ON DELETE CASCADE,
+    lab_test_id INT NOT NULL REFERENCES lab_test_catalog(id) ON DELETE CASCADE,
+    UNIQUE (lab_slot_id, lab_test_id)
+);
+
+-- =============================================================
+-- 33. LAB_APPOINTMENTS
+-- =============================================================
+CREATE TABLE lab_appointments (
+    id              SERIAL PRIMARY KEY,
+    patient_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    lab_slot_id     INT NOT NULL REFERENCES lab_slots(id) ON DELETE CASCADE,
+    lab_test_id     INT REFERENCES lab_test_catalog(id) ON DELETE SET NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','confirmed','completed','cancelled')),
+    notes           TEXT,
+    booked_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    branch_id       INT REFERENCES branches(id) ON DELETE SET NULL
+);
+
+-- =============================================================
+-- 34. MEDICAL_REPORTS
+-- =============================================================
+CREATE TABLE medical_reports (
+    id                SERIAL PRIMARY KEY,
+    report_type       VARCHAR(50) NOT NULL,
+    encounter_id      INT REFERENCES encounters(id) ON DELETE SET NULL,
+    lab_order_id      INT REFERENCES lab_orders(id) ON DELETE SET NULL,
+    radiology_order_id INT REFERENCES radiology_orders(id) ON DELETE SET NULL,
+    patient_user_id   INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id    INT REFERENCES users(id) ON DELETE SET NULL,
+    title             VARCHAR(255) NOT NULL,
+    summary           TEXT,
+    report_date       DATE,
+    status            VARCHAR(20),
+    created_by        INT REFERENCES users(id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 35. REPORT_FILES
+-- =============================================================
+CREATE TABLE report_files (
+    id          SERIAL PRIMARY KEY,
+    report_id   INT NOT NULL REFERENCES medical_reports(id) ON DELETE CASCADE,
+    file_name   VARCHAR(255) NOT NULL,
+    file_type   VARCHAR(100),
+    file_size   INT,
+    storage_url TEXT,
+    storage_key TEXT,
+    uploaded_by INT REFERENCES users(id) ON DELETE SET NULL,
+    uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 36. SUBSCRIPTION_PLANS
 -- =============================================================
 CREATE TABLE subscription_plans (
     id            SERIAL PRIMARY KEY,
@@ -656,7 +728,7 @@ CREATE TABLE subscription_plans (
 );
 
 -- =============================================================
--- 29. USER_SUBSCRIPTIONS
+-- 37. USER_SUBSCRIPTIONS
 -- =============================================================
 CREATE TABLE user_subscriptions (
     id                SERIAL PRIMARY KEY,
@@ -672,7 +744,7 @@ CREATE TABLE user_subscriptions (
 );
 
 -- =============================================================
--- 30. AI_SESSIONS
+-- 38. AI_SESSIONS
 -- =============================================================
 CREATE TABLE ai_sessions (
     id           SERIAL PRIMARY KEY,
@@ -688,7 +760,7 @@ CREATE TABLE ai_sessions (
 );
 
 -- =============================================================
--- 31. AI_OUTPUTS
+-- 39. AI_OUTPUTS
 -- =============================================================
 CREATE TABLE ai_outputs (
     id          SERIAL PRIMARY KEY,
@@ -701,7 +773,7 @@ CREATE TABLE ai_outputs (
 );
 
 -- =============================================================
--- 32. AI_TRANSCRIPTS
+-- 40. AI_TRANSCRIPTS
 -- =============================================================
 CREATE TABLE ai_transcripts (
     id         SERIAL PRIMARY KEY,
@@ -712,7 +784,77 @@ CREATE TABLE ai_transcripts (
 );
 
 -- =============================================================
--- 33. NOTIFICATIONS
+-- 41. AI_SUMMARIES
+-- =============================================================
+CREATE TABLE ai_summaries (
+    id                  SERIAL PRIMARY KEY,
+    summary_type        VARCHAR(30) NOT NULL
+                          CHECK (summary_type IN (
+                            'call',
+                            'encounter',
+                            'report',
+                            'lab_order',
+                            'radiology_order',
+                            'prescription',
+                            'general'
+                          )),
+    appointment_id      INT REFERENCES appointments(id) ON DELETE SET NULL,
+    encounter_id        INT REFERENCES encounters(id) ON DELETE SET NULL,
+    report_id           INT REFERENCES medical_reports(id) ON DELETE SET NULL,
+    lab_order_id        INT REFERENCES lab_orders(id) ON DELETE SET NULL,
+    radiology_order_id  INT REFERENCES radiology_orders(id) ON DELETE SET NULL,
+    prescription_id     INT REFERENCES prescriptions(id) ON DELETE SET NULL,
+    patient_user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id      INT REFERENCES users(id) ON DELETE SET NULL,
+    content             TEXT NOT NULL,
+    structured_data     JSONB,
+    ai_model            VARCHAR(100),
+    language            VARCHAR(10) DEFAULT 'en',
+    generated_by        INT REFERENCES users(id) ON DELETE SET NULL,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================
+-- 42. CALL_AI_NOTES
+-- =============================================================
+CREATE TABLE call_ai_notes (
+    id              SERIAL PRIMARY KEY,
+    appointment_id  INT REFERENCES appointments(id) ON DELETE CASCADE,
+    room_id         VARCHAR(255),
+    patient_user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id  INT REFERENCES users(id) ON DELETE SET NULL,
+    note_type       VARCHAR(30) DEFAULT 'realtime'
+                      CHECK (note_type IN ('realtime', 'interim', 'final')),
+    content         TEXT,
+    structured_data JSONB,
+    ai_model        VARCHAR(100),
+    language        VARCHAR(10) DEFAULT 'en',
+    created_by      INT REFERENCES users(id) ON DELETE SET NULL,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================
+-- 43. CALL_TRANSCRIPTIONS
+-- =============================================================
+CREATE TABLE call_transcriptions (
+    id               SERIAL PRIMARY KEY,
+    appointment_id   INT REFERENCES appointments(id) ON DELETE SET NULL,
+    room_id          VARCHAR(255),
+    room_name        VARCHAR(255),
+    transcription    TEXT NOT NULL,
+    language         VARCHAR(10) DEFAULT 'en',
+    duration_seconds INT,
+    started_at       TIMESTAMPTZ,
+    ended_at         TIMESTAMPTZ,
+    created_by       INT REFERENCES users(id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================
+-- 44. NOTIFICATIONS
 -- =============================================================
 CREATE TABLE notifications (
     id         SERIAL PRIMARY KEY,
@@ -727,7 +869,22 @@ CREATE TABLE notifications (
 );
 
 -- =============================================================
--- 34. AUDIT_LOGS
+-- 45. FCM_TOKENS
+-- =============================================================
+CREATE TABLE fcm_tokens (
+    id         SERIAL PRIMARY KEY,
+    user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token      TEXT NOT NULL,
+    device_id  VARCHAR(255),
+    platform   VARCHAR(20) CHECK (platform IN ('android', 'ios', 'web')),
+    is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, device_id)
+);
+
+-- =============================================================
+-- 46. AUDIT_LOGS
 -- =============================================================
 CREATE TABLE audit_logs (
     id         SERIAL PRIMARY KEY,
@@ -740,6 +897,42 @@ CREATE TABLE audit_logs (
     ip_address INET,
     user_agent TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 47. PASSWORD_RESET_TOKENS
+-- =============================================================
+CREATE TABLE password_reset_tokens (
+    id         SERIAL PRIMARY KEY,
+    user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code       CHAR(6) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 48. EMAIL_VERIFICATION_TOKENS (for registration OTP)
+-- =============================================================
+CREATE TABLE email_verification_tokens (
+    id         SERIAL PRIMARY KEY,
+    email      VARCHAR(255) NOT NULL,
+    code       CHAR(6) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- 49. VIDEO_CALL_ROOMS (100ms integration)
+-- =============================================================
+CREATE TABLE video_call_rooms (
+    id                SERIAL PRIMARY KEY,
+    appointment_id    INT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+    patient_user_id   INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    room_id           VARCHAR(100) NOT NULL,
+    patient_room_code VARCHAR(50) NOT NULL,
+    doctor_room_code  VARCHAR(50) NOT NULL,
+    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =============================================================
@@ -770,10 +963,16 @@ CREATE TRIGGER trg_encounters_updated_at     BEFORE UPDATE ON encounters        
 CREATE TRIGGER trg_clinical_notes_updated_at BEFORE UPDATE ON clinical_notes     FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_prescriptions_updated_at  BEFORE UPDATE ON prescriptions      FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_inv_items_updated_at      BEFORE UPDATE ON inventory_items    FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+CREATE TRIGGER trg_inv_orders_updated_at     BEFORE UPDATE ON inventory_orders   FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_lab_orders_updated_at     BEFORE UPDATE ON lab_orders         FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_radio_orders_updated_at   BEFORE UPDATE ON radiology_orders   FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+CREATE TRIGGER trg_medical_reports_updated_at BEFORE UPDATE ON medical_reports   FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_sub_plans_updated_at      BEFORE UPDATE ON subscription_plans FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_user_subs_updated_at      BEFORE UPDATE ON user_subscriptions FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+CREATE TRIGGER trg_ai_summaries_updated_at   BEFORE UPDATE ON ai_summaries        FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+CREATE TRIGGER trg_call_ai_notes_updated_at  BEFORE UPDATE ON call_ai_notes       FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+CREATE TRIGGER trg_call_trans_updated_at     BEFORE UPDATE ON call_transcriptions FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+CREATE TRIGGER trg_fcm_tokens_updated_at     BEFORE UPDATE ON fcm_tokens          FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 
 -- =============================================================
 -- INDEXES
@@ -788,39 +987,75 @@ CREATE INDEX idx_patients_code          ON patients(patient_code);
 CREATE INDEX idx_patients_phone         ON patients(phone);
 CREATE INDEX idx_patients_email         ON patients(email);
 
-CREATE INDEX idx_appt_patient           ON appointments(patient_id);
-CREATE INDEX idx_appt_doctor            ON appointments(doctor_id, doctor_branch_id);
+CREATE INDEX idx_appt_patient_user       ON appointments(patient_user_id);
+CREATE INDEX idx_appt_doctor_user        ON appointments(doctor_user_id, doctor_branch_id);
 CREATE INDEX idx_appt_date              ON appointments(appointment_date);
 CREATE INDEX idx_appt_status            ON appointments(status);
 
 CREATE INDEX idx_payments_appointment   ON payments(appointment_id);
-CREATE INDEX idx_payments_patient       ON payments(patient_id);
+CREATE INDEX idx_payments_patient_user  ON payments(patient_user_id);
 
-CREATE INDEX idx_encounters_patient     ON encounters(patient_id);
-CREATE INDEX idx_encounters_doctor      ON encounters(doctor_id, doctor_branch_id);
+CREATE INDEX idx_encounters_patient_user ON encounters(patient_user_id);
+CREATE INDEX idx_encounters_doctor_user  ON encounters(doctor_user_id);
 CREATE INDEX idx_encounters_date        ON encounters(encounter_date);
 CREATE INDEX idx_encounters_appt        ON encounters(appointment_id);
 
 CREATE INDEX idx_diagnoses_encounter    ON diagnoses(encounter_id);
-CREATE INDEX idx_diagnoses_patient      ON diagnoses(patient_id);
+CREATE INDEX idx_diagnoses_patient_user ON diagnoses(patient_user_id);
 
 CREATE INDEX idx_vitals_encounter       ON vitals(encounter_id);
 CREATE INDEX idx_clinical_notes_enc     ON clinical_notes(encounter_id);
 
-CREATE INDEX idx_prescriptions_patient  ON prescriptions(patient_id);
+CREATE INDEX idx_prescriptions_patient_user  ON prescriptions(patient_user_id);
 CREATE INDEX idx_prescriptions_enc      ON prescriptions(encounter_id);
 
-CREATE INDEX idx_inv_items_org          ON inventory_items(organization_id);
+CREATE INDEX idx_inv_items_branch       ON inventory_items(branch_id);
 CREATE INDEX idx_inv_trans_item         ON inventory_transactions(inventory_item_id);
 
+CREATE INDEX idx_inv_orders_patient_user ON inventory_orders(patient_user_id);
+CREATE INDEX idx_inv_orders_item     ON inventory_orders(inventory_item_id);
+CREATE INDEX idx_inv_orders_branch   ON inventory_orders(branch_id);
+CREATE INDEX idx_inv_orders_status   ON inventory_orders(status);
+CREATE INDEX idx_inv_orders_order_by_user ON inventory_orders(order_by_doctor_user_id);
+
+CREATE INDEX idx_lab_test_catalog_branch  ON lab_test_catalog(branch_id);
+CREATE INDEX idx_radio_test_catalog_branch ON radiology_test_catalog(branch_id);
+
 CREATE INDEX idx_lab_orders_encounter   ON lab_orders(encounter_id);
-CREATE INDEX idx_lab_orders_patient     ON lab_orders(patient_id);
+CREATE INDEX idx_lab_orders_patient_user ON lab_orders(patient_user_id);
 
 CREATE INDEX idx_radio_orders_encounter ON radiology_orders(encounter_id);
-CREATE INDEX idx_radio_orders_patient   ON radiology_orders(patient_id);
+CREATE INDEX idx_radio_orders_patient_user ON radiology_orders(patient_user_id);
+
+CREATE INDEX idx_lab_slots_staff_user   ON lab_slots(lab_staff_user_id, slot_date);
+CREATE INDEX idx_lab_slots_date         ON lab_slots(slot_date);
+CREATE INDEX idx_lab_appt_patient_user  ON lab_appointments(patient_user_id);
+CREATE INDEX idx_lab_appt_slot          ON lab_appointments(lab_slot_id);
+CREATE INDEX idx_lab_staff_user         ON lab_staff_profiles(user_id);
+
+CREATE INDEX idx_medical_reports_patient_user ON medical_reports(patient_user_id);
+CREATE INDEX idx_medical_reports_report_date ON medical_reports(report_date);
+CREATE INDEX idx_report_files_report_id ON report_files(report_id);
+
+CREATE INDEX idx_ai_summaries_patient_user      ON ai_summaries(patient_user_id);
+CREATE INDEX idx_ai_summaries_appointment  ON ai_summaries(appointment_id);
+CREATE INDEX idx_ai_summaries_encounter    ON ai_summaries(encounter_id);
+CREATE INDEX idx_ai_summaries_type         ON ai_summaries(summary_type);
+
+CREATE INDEX idx_call_ai_notes_appointment ON call_ai_notes(appointment_id);
+CREATE INDEX idx_call_ai_notes_room        ON call_ai_notes(room_id);
+CREATE INDEX idx_call_ai_notes_patient_user ON call_ai_notes(patient_user_id);
+CREATE INDEX idx_call_ai_notes_doctor_user  ON call_ai_notes(doctor_user_id);
+
+CREATE INDEX idx_call_transcriptions_appointment ON call_transcriptions(appointment_id);
+CREATE INDEX idx_call_transcriptions_room ON call_transcriptions(room_id);
 
 CREATE INDEX idx_notifications_user     ON notifications(user_id);
 CREATE INDEX idx_notifications_read     ON notifications(is_read);
+
+CREATE INDEX idx_fcm_tokens_user_id     ON fcm_tokens(user_id);
+CREATE INDEX idx_fcm_tokens_token       ON fcm_tokens(token);
+CREATE INDEX idx_fcm_tokens_active      ON fcm_tokens(user_id, is_active);
 
 CREATE INDEX idx_ai_sessions_user       ON ai_sessions(user_id);
 CREATE INDEX idx_ai_transcripts_session ON ai_transcripts(session_id);
@@ -829,47 +1064,7 @@ CREATE INDEX idx_audit_user             ON audit_logs(user_id);
 CREATE INDEX idx_audit_created_at       ON audit_logs(created_at);
 CREATE INDEX idx_audit_table            ON audit_logs(table_name);
 
--- =============================================================
--- 35. PASSWORD_RESET_TOKENS
--- =============================================================
-CREATE TABLE password_reset_tokens (
-    id         SERIAL PRIMARY KEY,
-    user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    code       CHAR(6) NOT NULL,
-    expires_at TIMESTAMP NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_prt_user_id ON password_reset_tokens(user_id);
-
--- =============================================================
--- 36. EMAIL_VERIFICATION_TOKENS (for registration OTP)
--- =============================================================
-CREATE TABLE email_verification_tokens (
-    id         SERIAL PRIMARY KEY,
-    email      VARCHAR(255) NOT NULL,
-    code       CHAR(6) NOT NULL,
-    expires_at TIMESTAMP NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_evt_email ON email_verification_tokens(email);
-
--- =============================================================
--- 37. VIDEO_CALL_ROOMS (100ms integration)
--- =============================================================
-CREATE TABLE video_call_rooms (
-    id                 SERIAL PRIMARY KEY,
-    appointment_id     INT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
-    patient_id         INT NOT NULL REFERENCES patients(id),
-    doctor_id          INT NOT NULL,
-    doctor_branch_id   INT NOT NULL,
-    room_id            VARCHAR(100) NOT NULL,
-    patient_room_code  VARCHAR(50) NOT NULL,
-    doctor_room_code   VARCHAR(50) NOT NULL,
-    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-ALTER TABLE video_call_rooms
-    ADD CONSTRAINT video_call_rooms_doctor_fkey
-    FOREIGN KEY (doctor_id, doctor_branch_id) REFERENCES doctors(employee_id, branch_id);
 CREATE UNIQUE INDEX idx_vcr_appointment ON video_call_rooms(appointment_id);
 CREATE INDEX idx_vcr_room_id ON video_call_rooms(room_id);
 
+CREATE INDEX idx_doc_sched_doctor_user_branch ON doctor_schedules(doctor_user_id, doctor_branch_id);

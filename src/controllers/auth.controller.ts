@@ -84,12 +84,10 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     const isEmail = identifier.includes('@');
     const result = await query(
       `SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name,
-              u.phone, u.cnic, u.is_active, u.organization_id,
-              r.id AS role_id, r.name AS role_name, r.permissions,
-              o.name AS organization_name
+              u.phone, u.cnic, u.is_active,
+              r.id AS role_id, r.name AS role_name, r.permissions
        FROM users u
        JOIN roles r ON r.id = u.role_id
-       LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE ${isEmail ? 'u.email = $1' : 'u.cnic = $1'}`,
       [identifier],
     );
@@ -157,7 +155,6 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       roleId: user.role_id,
       roleName: user.role_name,
       email: user.email,
-      organizationId: user.organization_id ?? null,
     };
     const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
     const refreshToken = jwt.sign(payload, env.jwtRefreshSecret, { expiresIn: env.jwtRefreshExpiresIn } as jwt.SignOptions);
@@ -178,8 +175,6 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           cnic: user.cnic,
           gender: patientData.gender ?? null,
           date_of_birth: patientData.date_of_birth ?? null,
-          organization_id: user.organization_id ?? null,
-          organization_name: user.organization_name ?? null,
           ...(doctorId !== null && { doctor_id: doctorId, doctor_branch_id: doctorBranchId }),
           ...(patientData.id !== undefined && { patient_id: patientData.id }),
         },
@@ -461,7 +456,11 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
 // POST /auth/register-lab-staff  (Admin only)
 export const registerLabStaff = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, phone, email, password, organization_id } = req.body;
+    const { name, phone, email, password, branch_id } = req.body;
+    if (!branch_id) {
+      res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
 
     const dup = await query(`SELECT id FROM users WHERE email = $1`, [email]);
     if (dup.rows.length > 0) {
@@ -487,16 +486,16 @@ export const registerLabStaff = async (req: Request, res: Response, next: NextFu
       const last_name = rest.join(' ') || '';
 
       const userRes = await client.query(
-        `INSERT INTO users (role_id, first_name, last_name, email, password_hash, phone, organization_id, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING id`,
-        [roleId, first_name, last_name, email, hash, phone ?? null, organization_id ?? null],
+        `INSERT INTO users (role_id, first_name, last_name, email, password_hash, phone, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,true) RETURNING id`,
+        [roleId, first_name, last_name, email, hash, phone ?? null],
       );
       const newUserId = userRes.rows[0].id;
 
       await client.query(
-        `INSERT INTO lab_staff_profiles (user_id, name, phone, email, organization_id)
+        `INSERT INTO lab_staff_profiles (user_id, name, phone, email, branch_id)
          VALUES ($1,$2,$3,$4,$5)`,
-        [newUserId, name, phone ?? null, email, organization_id ?? null],
+        [newUserId, name, phone ?? null, email, branch_id ?? null],
       );
 
       await client.query('COMMIT');

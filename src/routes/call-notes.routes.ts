@@ -18,7 +18,7 @@ router.post(
   authenticate,
   [
     body('appointment_id').isInt({ min: 1 }),
-    body('patient_id').isInt({ min: 1 }),
+    body('patient_user_id').isInt({ min: 1 }),
     body('note_type').optional().isIn(NOTE_TYPES),
   ],
   validate,

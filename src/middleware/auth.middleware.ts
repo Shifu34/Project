@@ -54,8 +54,7 @@ export const orgScope = (req: AuthRequest, _res: Response, next: NextFunction): 
   if (req.user?.roleName === 'super_admin') {
     req.orgFilter = { sql: '', params: [], isSuperAdmin: true };
   } else {
-    const orgId = req.user?.organizationId ?? null;
-    req.orgFilter = { sql: orgId ? 'organization_id = $ORG' : '', params: orgId ? [orgId] : [], isSuperAdmin: false };
+    req.orgFilter = { sql: '', params: [], isSuperAdmin: false };
   }
   next();
 };

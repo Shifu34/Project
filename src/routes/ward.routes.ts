@@ -41,8 +41,8 @@ router.get('/admissions/:id', wardCtrl.getAdmissionById);
 
 router.post('/admissions',
   authorize('admin', 'doctor'),
-  body('patient_id').isInt(),
-  body('doctor_id').isInt(),
+  body('patient_user_id').isInt(),
+  body('doctor_user_id').isInt(),
   body('bed_id').isInt(),
   body('ward_id').isInt(),
   validate,

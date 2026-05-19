@@ -31,8 +31,8 @@ async function attachSlotTests(rows: any[]): Promise<any[]> {
 // ---------------------------------------------------------------------------
 // Helper: resolve lab_staff_profiles row from user_id
 // ---------------------------------------------------------------------------
-async function resolveLabStaff(userId: number): Promise<{ id: number; organization_id: number | null } | null> {
-  const res = await query(`SELECT id, organization_id FROM lab_staff_profiles WHERE user_id = $1 LIMIT 1`, [userId]);
+async function resolveLabStaff(userId: number): Promise<{ id: number; branch_id: number | null } | null> {
+  const res = await query(`SELECT id, branch_id FROM lab_staff_profiles WHERE user_id = $1 LIMIT 1`, [userId]);
   return res.rows[0] ?? null;
 }
 
@@ -46,17 +46,17 @@ export const getLabSlots = async (req: AuthRequest, res: Response, next: NextFun
   try {
     const { userId, roleName } = req.user!;
 
-    const orgFilter = req.query.organization_id ? Number(req.query.organization_id) : null;
+    const branchFilter = req.query.branch_id ? Number(req.query.branch_id) : null;
 
     let rows;
     if (roleName === 'lab_staff') {
       const staff = await resolveLabStaff(userId);
       if (!staff) { res.status(404).json({ success: false, message: 'Lab staff profile not found' }); return; }
       const result = await query(
-        `SELECT ls.*, lsp.name AS staff_name, o.name AS organization_name
+        `SELECT ls.*, lsp.name AS staff_name, b.name AS branch_name, b.branch_code
          FROM lab_slots ls
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
-         LEFT JOIN organizations o ON o.id = ls.organization_id
+         LEFT JOIN branches b ON b.id = ls.branch_id
          WHERE ls.lab_staff_id = $1
          ORDER BY ls.slot_date, ls.slot_time`,
         [staff.id],
@@ -64,18 +64,18 @@ export const getLabSlots = async (req: AuthRequest, res: Response, next: NextFun
       rows = await attachSlotTests(result.rows);
     } else if (roleName === 'patient') {
       const params: unknown[] = [];
-      let orgWhere = '';
-      if (orgFilter) { params.push(orgFilter); orgWhere = `AND ls.organization_id = $${params.length}`; }
+      let branchWhere = '';
+      if (branchFilter) { params.push(branchFilter); branchWhere = `AND ls.branch_id = $${params.length}`; }
       const result = await query(
-        `SELECT ls.*, lsp.name AS staff_name, o.name AS organization_name,
+        `SELECT ls.*, lsp.name AS staff_name, b.name AS branch_name, b.branch_code,
                 (ls.max_bookings - COUNT(la.id)) AS remaining_bookings
          FROM lab_slots ls
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
-         LEFT JOIN organizations o ON o.id = ls.organization_id
+         LEFT JOIN branches b ON b.id = ls.branch_id
          LEFT JOIN lab_appointments la
            ON la.lab_slot_id = ls.id AND la.status NOT IN ('cancelled')
-         WHERE ls.is_active = true AND ls.slot_date >= CURRENT_DATE ${orgWhere}
-         GROUP BY ls.id, lsp.name, o.name
+         WHERE ls.is_active = true AND ls.slot_date >= CURRENT_DATE ${branchWhere}
+         GROUP BY ls.id, lsp.name, b.name, b.branch_code
          HAVING (ls.max_bookings - COUNT(la.id)) > 0
          ORDER BY ls.slot_date, ls.slot_time`,
         params,
@@ -84,14 +84,14 @@ export const getLabSlots = async (req: AuthRequest, res: Response, next: NextFun
     } else {
       // admin: all slots, optional org filter
       const params: unknown[] = [];
-      let orgWhere = '';
-      if (orgFilter) { params.push(orgFilter); orgWhere = `WHERE ls.organization_id = $${params.length}`; }
+      let branchWhere = '';
+      if (branchFilter) { params.push(branchFilter); branchWhere = `WHERE ls.branch_id = $${params.length}`; }
       const result = await query(
-        `SELECT ls.*, lsp.name AS staff_name, o.name AS organization_name
+        `SELECT ls.*, lsp.name AS staff_name, b.name AS branch_name, b.branch_code
          FROM lab_slots ls
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
-         LEFT JOIN organizations o ON o.id = ls.organization_id
-         ${orgWhere}
+         LEFT JOIN branches b ON b.id = ls.branch_id
+         ${branchWhere}
          ORDER BY ls.slot_date DESC, ls.slot_time`,
         params,
       );
@@ -115,14 +115,14 @@ export const createLabSlot = async (req: AuthRequest, res: Response, next: NextF
     const staff = await resolveLabStaff(userId);
     if (!staff) { await client.query('ROLLBACK'); res.status(404).json({ success: false, message: 'Lab staff profile not found' }); return; }
 
-    const { test_ids, slot_date, slot_time, duration_minutes, max_bookings, organization_id } = req.body;
-    const resolvedOrgId = organization_id ?? staff.organization_id ?? null;
+    const { test_ids, slot_date, slot_time, duration_minutes, max_bookings, branch_id } = req.body;
+    const resolvedBranchId = branch_id ?? staff.branch_id ?? null;
     const ids: number[] = Array.isArray(test_ids) ? test_ids.map(Number) : [];
 
     const result = await client.query(
-      `INSERT INTO lab_slots (lab_staff_id, slot_date, slot_time, duration_minutes, max_bookings, organization_id)
+      `INSERT INTO lab_slots (lab_staff_id, slot_date, slot_time, duration_minutes, max_bookings, branch_id)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [staff.id, slot_date, slot_time, duration_minutes ?? 15, max_bookings ?? 1, resolvedOrgId],
+      [staff.id, slot_date, slot_time, duration_minutes ?? 15, max_bookings ?? 1, resolvedBranchId],
     );
     const slot = result.rows[0];
 
@@ -149,7 +149,7 @@ export const updateLabSlot = async (req: AuthRequest, res: Response, next: NextF
     if (!staff) { res.status(404).json({ success: false, message: 'Lab staff profile not found' }); return; }
 
     const slotId = Number(req.params.id);
-    const { test_ids, slot_date, slot_time, duration_minutes, max_bookings, is_active, organization_id } = req.body;
+    const { test_ids, slot_date, slot_time, duration_minutes, max_bookings, is_active, branch_id } = req.body;
 
     const client = await getClient();
     try {
@@ -162,12 +162,12 @@ export const updateLabSlot = async (req: AuthRequest, res: Response, next: NextF
              duration_minutes = COALESCE($3, duration_minutes),
              max_bookings     = COALESCE($4, max_bookings),
              is_active        = COALESCE($5, is_active),
-             organization_id  = COALESCE($6, organization_id)
+           branch_id        = COALESCE($6, branch_id)
          WHERE id = $7 AND lab_staff_id = $8
          RETURNING *`,
         [slot_date ?? null, slot_time ?? null,
          duration_minutes ?? null, max_bookings ?? null, is_active ?? null,
-         organization_id ?? null, slotId, staff.id],
+         branch_id ?? null, slotId, staff.id],
       );
 
       if (result.rows.length === 0) {
@@ -232,7 +232,7 @@ export const getLabAppointments = async (req: AuthRequest, res: Response, next: 
     const { userId, roleName } = req.user!;
 
     let result;
-    const orgFilter = req.query.organization_id ? Number(req.query.organization_id) : null;
+    const branchFilter = req.query.branch_id ? Number(req.query.branch_id) : null;
 
     if (roleName === 'lab_staff') {
       const staff = await resolveLabStaff(userId);
@@ -240,48 +240,45 @@ export const getLabAppointments = async (req: AuthRequest, res: Response, next: 
       result = await query(
         `SELECT la.*, ls.slot_date, ls.slot_time,
                 p.first_name AS patient_first, p.last_name AS patient_last,
-                ltc.name AS test_name, o.name AS organization_name
+                ltc.name AS test_name, b.name AS branch_name, b.branch_code
          FROM lab_appointments la
          JOIN lab_slots ls ON ls.id = la.lab_slot_id
-         JOIN patients p ON p.id = la.patient_id
+         JOIN patients p ON p.user_id = la.patient_user_id
          LEFT JOIN lab_test_catalog ltc ON ltc.id = la.lab_test_id
-         LEFT JOIN organizations o ON o.id = la.organization_id
+         LEFT JOIN branches b ON b.id = la.branch_id
          WHERE ls.lab_staff_id = $1
          ORDER BY ls.slot_date DESC, ls.slot_time`,
         [staff.id],
       );
     } else if (roleName === 'patient') {
-      const patRes = await query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
-      const patientId = patRes.rows[0]?.id;
-      if (!patientId) { res.status(404).json({ success: false, message: 'Patient profile not found' }); return; }
       result = await query(
         `SELECT la.*, ls.slot_date, ls.slot_time,
-                lsp.name AS staff_name, ltc.name AS test_name, o.name AS organization_name
+                lsp.name AS staff_name, ltc.name AS test_name, b.name AS branch_name, b.branch_code
          FROM lab_appointments la
          JOIN lab_slots ls ON ls.id = la.lab_slot_id
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
          LEFT JOIN lab_test_catalog ltc ON ltc.id = la.lab_test_id
-         LEFT JOIN organizations o ON o.id = la.organization_id
-         WHERE la.patient_id = $1
+         LEFT JOIN branches b ON b.id = la.branch_id
+         WHERE la.patient_user_id = $1
          ORDER BY ls.slot_date DESC, ls.slot_time`,
-        [patientId],
+        [userId],
       );
     } else {
       // admin: all appointments, optional org filter
       const params: unknown[] = [];
-      let orgWhere = '';
-      if (orgFilter) { params.push(orgFilter); orgWhere = `WHERE la.organization_id = $${params.length}`; }
+      let branchWhere = '';
+      if (branchFilter) { params.push(branchFilter); branchWhere = `WHERE la.branch_id = $${params.length}`; }
       result = await query(
         `SELECT la.*, ls.slot_date, ls.slot_time,
                 p.first_name AS patient_first, p.last_name AS patient_last,
-                lsp.name AS staff_name, ltc.name AS test_name, o.name AS organization_name
+                lsp.name AS staff_name, ltc.name AS test_name, b.name AS branch_name, b.branch_code
          FROM lab_appointments la
          JOIN lab_slots ls ON ls.id = la.lab_slot_id
-         JOIN patients p ON p.id = la.patient_id
+         JOIN patients p ON p.user_id = la.patient_user_id
          JOIN lab_staff_profiles lsp ON lsp.id = ls.lab_staff_id
          LEFT JOIN lab_test_catalog ltc ON ltc.id = la.lab_test_id
-         LEFT JOIN organizations o ON o.id = la.organization_id
-         ${orgWhere}
+         LEFT JOIN branches b ON b.id = la.branch_id
+         ${branchWhere}
          ORDER BY ls.slot_date DESC, ls.slot_time`,
         params,
       );
@@ -304,9 +301,9 @@ export const bookLabAppointment = async (req: AuthRequest, res: Response, next: 
 
     await client.query('BEGIN');
 
-    const patRes = await client.query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
-    const patientId = patRes.rows[0]?.id;
-    if (!patientId) {
+    const patRes = await client.query(`SELECT user_id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
+    const patientUserId = patRes.rows[0]?.user_id;
+    if (!patientUserId) {
       await client.query('ROLLBACK');
       res.status(404).json({ success: false, message: 'Patient profile not found' });
       return;
@@ -314,13 +311,13 @@ export const bookLabAppointment = async (req: AuthRequest, res: Response, next: 
 
     // Check slot availability (lock the row)
     const slotRes = await client.query(
-      `SELECT ls.id, ls.max_bookings, ls.organization_id,
+      `SELECT ls.id, ls.max_bookings, ls.branch_id,
               COUNT(la.id) AS current_bookings
        FROM lab_slots ls
        LEFT JOIN lab_appointments la
          ON la.lab_slot_id = ls.id AND la.status NOT IN ('cancelled')
        WHERE ls.id = $1 AND ls.is_active = true AND ls.slot_date >= CURRENT_DATE
-       GROUP BY ls.id, ls.max_bookings, ls.organization_id
+       GROUP BY ls.id, ls.max_bookings, ls.branch_id
        FOR UPDATE OF ls`,
       [lab_slot_id],
     );
@@ -338,13 +335,13 @@ export const bookLabAppointment = async (req: AuthRequest, res: Response, next: 
       return;
     }
 
-    // Carry the slot's organization_id into the appointment for easy filtering
-    const orgId = slotRes.rows[0].organization_id ?? null;
+    // Carry the slot's branch_id into the appointment for easy filtering
+    const branchId = slotRes.rows[0].branch_id ?? null;
 
     const result = await client.query(
-      `INSERT INTO lab_appointments (patient_id, lab_slot_id, lab_test_id, notes, organization_id)
+      `INSERT INTO lab_appointments (patient_user_id, lab_slot_id, lab_test_id, notes, branch_id)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [patientId, lab_slot_id, lab_test_id ?? null, notes ?? null, orgId],
+      [patientUserId, lab_slot_id, lab_test_id ?? null, notes ?? null, branchId],
     );
 
     await client.query('COMMIT');

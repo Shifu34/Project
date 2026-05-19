@@ -15,12 +15,12 @@ export const getPatients = async (req: AuthRequest, res: Response, next: NextFun
     let doctorId: number | null = null;
     let doctorBranchId: number | null = null;
     if (req.user?.roleName === 'doctor') {
-      const docRes = await query(`SELECT employee_id AS id, branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [req.user.userId]);
+      const docRes = await query(`SELECT branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [req.user.userId]);
       if (docRes.rows.length === 0) {
         res.status(404).json({ success: false, message: 'Doctor profile not found' });
         return;
       }
-      doctorId = docRes.rows[0].id;
+      doctorId = req.user.userId;
       doctorBranchId = docRes.rows[0].branch_id;
     }
 
@@ -30,9 +30,9 @@ export const getPatients = async (req: AuthRequest, res: Response, next: NextFun
     const countClauses: string[] = [];
 
     if (doctorId !== null && doctorBranchId !== null) {
-      dataClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${dataValues.length + 1} AND doctor_branch_id = $${dataValues.length + 2})`);
+      dataClauses.push(`p.user_id IN (SELECT DISTINCT patient_user_id FROM appointments WHERE doctor_user_id = $${dataValues.length + 1} AND doctor_branch_id = $${dataValues.length + 2})`);
       dataValues.push(doctorId, doctorBranchId);
-      countClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${countValues.length + 1} AND doctor_branch_id = $${countValues.length + 2})`);
+      countClauses.push(`p.user_id IN (SELECT DISTINCT patient_user_id FROM appointments WHERE doctor_user_id = $${countValues.length + 1} AND doctor_branch_id = $${countValues.length + 2})`);
       countValues.push(doctorId, doctorBranchId);
     }
 
@@ -90,12 +90,12 @@ export const searchPatientsByParams = async (req: AuthRequest, res: Response, ne
     let doctorId: number | null = null;
     let doctorBranchId: number | null = null;
     if (req.user?.roleName === 'doctor') {
-      const docRes = await query(`SELECT employee_id AS id, branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [req.user.userId]);
+      const docRes = await query(`SELECT branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [req.user.userId]);
       if (docRes.rows.length === 0) {
         res.status(404).json({ success: false, message: 'Doctor profile not found' });
         return;
       }
-      doctorId = docRes.rows[0].id;
+      doctorId = req.user.userId;
       doctorBranchId = docRes.rows[0].branch_id;
     }
 
@@ -112,9 +112,9 @@ export const searchPatientsByParams = async (req: AuthRequest, res: Response, ne
     };
 
     if (doctorId !== null && doctorBranchId !== null) {
-      dataClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${dataValues.length + 1} AND doctor_branch_id = $${dataValues.length + 2})`);
+      dataClauses.push(`p.user_id IN (SELECT DISTINCT patient_user_id FROM appointments WHERE doctor_user_id = $${dataValues.length + 1} AND doctor_branch_id = $${dataValues.length + 2})`);
       dataValues.push(doctorId, doctorBranchId);
-      countClauses.push(`p.id IN (SELECT DISTINCT patient_id FROM appointments WHERE doctor_id = $${countValues.length + 1} AND doctor_branch_id = $${countValues.length + 2})`);
+      countClauses.push(`p.user_id IN (SELECT DISTINCT patient_user_id FROM appointments WHERE doctor_user_id = $${countValues.length + 1} AND doctor_branch_id = $${countValues.length + 2})`);
       countValues.push(doctorId, doctorBranchId);
     }
     if (first_name)    addFilter(`p.first_name ILIKE ?`,   `%${first_name}%`);
@@ -162,7 +162,7 @@ export const getPatientById = async (req: Request, res: Response, next: NextFunc
                 'policy_number',ui.policy_number,'is_primary',ui.is_primary
               )) FILTER (WHERE ui.id IS NOT NULL) AS insurance
        FROM patients p
-       LEFT JOIN user_insurances ui ON ui.patient_id = p.id
+      LEFT JOIN user_insurances ui ON ui.patient_user_id = p.user_id
        WHERE p.id = $1
        GROUP BY p.id`,
       [req.params.id],
@@ -190,7 +190,7 @@ export const getPatientByUserId = async (req: Request, res: Response, next: Next
                 'policy_number',ui.policy_number,'is_primary',ui.is_primary
               )) FILTER (WHERE ui.id IS NOT NULL) AS insurance
        FROM patients p
-       LEFT JOIN user_insurances ui ON ui.patient_id = p.id
+      LEFT JOIN user_insurances ui ON ui.patient_user_id = p.user_id
        WHERE p.user_id = $1
        GROUP BY p.id`,
       [userId],
@@ -215,7 +215,7 @@ export const createPatient = async (req: Request, res: Response, next: NextFunct
       marital_status, password,
     } = req.body;
 
-    const reqUser = (req as Request & { user?: { userId: number; organizationId?: number; roleId?: number } }).user;
+    const reqUser = (req as Request & { user?: { userId: number; roleId?: number } }).user;
 
     const client = await getClient();
     try {
@@ -227,10 +227,10 @@ export const createPatient = async (req: Request, res: Response, next: NextFunct
       const patientRoleId = roleRes.rows[0]?.id;
 
       const userRes = await client.query(
-        `INSERT INTO users (organization_id, role_id, first_name, last_name, email, password_hash, phone, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `INSERT INTO users (role_id, first_name, last_name, email, password_hash, phone, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
          RETURNING id`,
-        [reqUser?.organizationId, patientRoleId, first_name, last_name, email, hash, phone, true],
+        [patientRoleId, first_name, last_name, email, hash, phone, true],
       );
       const userId = userRes.rows[0].id;
 
@@ -372,10 +372,11 @@ export const getPatientAppointments = async (req: Request, res: Response, next: 
     const result = await query(
       `SELECT a.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name, d.name AS department
       FROM appointments a
-      JOIN doctors doc ON doc.employee_id = a.doctor_id AND doc.branch_id = a.doctor_branch_id
+      JOIN patients p ON p.user_id = a.patient_user_id
+      JOIN doctors doc ON doc.user_id = a.doctor_user_id AND doc.branch_id = a.doctor_branch_id
        JOIN users u ON u.id = doc.user_id
-       LEFT JOIN departments d ON d.id = a.department_id
-       WHERE a.patient_id = $1
+       LEFT JOIN departments d ON d.id = doc.department_id
+       WHERE p.id = $1
        ORDER BY a.appointment_date DESC, a.appointment_time DESC`,
       [req.params.id],
     );
@@ -391,9 +392,10 @@ export const getPatientVisits = async (req: Request, res: Response, next: NextFu
     const result = await query(
       `SELECT e.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name
       FROM encounters e
-      JOIN doctors doc ON doc.employee_id = e.doctor_id AND doc.branch_id = e.doctor_branch_id
+      JOIN patients p ON p.user_id = e.patient_user_id
+      JOIN doctors doc ON doc.user_id = e.doctor_user_id
        JOIN users u ON u.id = doc.user_id
-       WHERE e.patient_id = $1
+       WHERE p.id = $1
        ORDER BY e.encounter_date DESC`,
       [req.params.id],
     );
@@ -410,7 +412,7 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
 
     // 1. Patient demographics
     const patientRes = await query(
-      `SELECT p.id, p.patient_code, p.first_name, p.last_name,
+      `SELECT p.id, p.user_id, p.patient_code, p.first_name, p.last_name,
               p.gender, p.date_of_birth,
               DATE_PART('year', AGE(p.date_of_birth))::INT AS age,
               p.blood_type, p.phone, p.email, p.address,
@@ -424,6 +426,7 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
+    const patientUserId = patientRes.rows[0].user_id as number;
 
     // 2. Insurance
     const [
@@ -440,9 +443,9 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
         `SELECT ui.*, ip.name AS provider_name, ip.contact_phone AS provider_phone
          FROM user_insurances ui
          JOIN insurance_providers ip ON ip.id = ui.insurance_provider_id
-         WHERE ui.patient_id = $1
+         WHERE ui.patient_user_id = $1
          ORDER BY ui.is_primary DESC, ui.valid_from DESC`,
-        [patientId],
+        [patientUserId],
       ),
 
       // Encounters (full SOAP)
@@ -453,14 +456,12 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
                 d.specialization AS doctor_specialization,
                 dept.name AS department_name
          FROM encounters e
-         JOIN doctors d ON d.employee_id = e.doctor_id AND d.branch_id = e.doctor_branch_id
+         JOIN doctors d ON d.user_id = e.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
-         LEFT JOIN departments dept ON dept.id = (
-             SELECT department_id FROM appointments WHERE id = e.appointment_id LIMIT 1
-         )
-         WHERE e.patient_id = $1
+         LEFT JOIN departments dept ON dept.id = d.department_id
+         WHERE e.patient_user_id = $1
          ORDER BY e.encounter_date DESC`,
-        [patientId],
+        [patientUserId],
       ),
 
       // Diagnoses
@@ -469,11 +470,11 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
                 COALESCE(d.first_name || ' ' || d.last_name,
                          u.first_name || ' ' || u.last_name) AS doctor_name
          FROM diagnoses diag
-         JOIN doctors d ON d.employee_id = diag.doctor_id AND d.branch_id = diag.doctor_branch_id
+         JOIN doctors d ON d.user_id = diag.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
-         WHERE diag.patient_id = $1
+         WHERE diag.patient_user_id = $1
          ORDER BY diag.diagnosed_date DESC`,
-        [patientId],
+        [patientUserId],
       ),
 
       // Vitals (all recorded)
@@ -482,9 +483,9 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
                 CONCAT(u.first_name, ' ', u.last_name) AS recorded_by_name
          FROM vitals v
          LEFT JOIN users u ON u.id = v.recorded_by
-         WHERE v.patient_id = $1
+         WHERE v.patient_user_id = $1
          ORDER BY v.recorded_at DESC`,
-        [patientId],
+        [patientUserId],
       ),
 
       // Prescriptions with items
@@ -506,13 +507,13 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
                   ) ORDER BY pi.id
                 ) AS items
          FROM prescriptions p
-         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
+         JOIN doctors d ON d.user_id = p.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
-         WHERE p.patient_id = $1
+         WHERE p.patient_user_id = $1
          GROUP BY p.id, d.first_name, d.last_name, u.first_name, u.last_name
          ORDER BY p.prescription_date DESC`,
-        [patientId],
+        [patientUserId],
       ),
 
       // Lab orders with test results
@@ -536,14 +537,14 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
                   ) ORDER BY loi.id
                 ) AS results
          FROM lab_orders lo
-         JOIN doctors d ON d.employee_id = lo.doctor_id AND d.branch_id = lo.doctor_branch_id
+         JOIN doctors d ON d.user_id = lo.doctor_user_id AND d.branch_id = lo.doctor_branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
          LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
-         WHERE lo.patient_id = $1
+         WHERE lo.patient_user_id = $1
          GROUP BY lo.id, d.first_name, d.last_name, u.first_name, u.last_name
          ORDER BY lo.order_date DESC`,
-        [patientId],
+        [patientUserId],
       ),
 
       // Radiology orders with findings
@@ -565,14 +566,14 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
                   ) ORDER BY roi.id
                 ) AS results
          FROM radiology_orders ro
-         JOIN doctors d ON d.employee_id = ro.doctor_id AND d.branch_id = ro.doctor_branch_id
+         JOIN doctors d ON d.user_id = ro.doctor_user_id AND d.branch_id = ro.branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
          LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
-         WHERE ro.patient_id = $1
+         WHERE ro.patient_user_id = $1
          GROUP BY ro.id, d.first_name, d.last_name, u.first_name, u.last_name
          ORDER BY ro.order_date DESC`,
-        [patientId],
+        [patientUserId],
       ),
     ]);
 
@@ -629,31 +630,32 @@ export const getPatientEncounters = async (req: Request, res: Response, next: Ne
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const offset = (page - 1) * limit;
 
-    const [patientRes, insuranceRes] = await Promise.all([
-      query(
-        `SELECT p.id, p.patient_code, p.first_name, p.last_name,
-                p.gender, p.date_of_birth,
-                DATE_PART('year', AGE(p.date_of_birth))::INT AS age,
-                p.blood_type, p.phone, p.email, p.address,
-                p.emergency_contact_name, p.emergency_contact_phone,
-                p.marital_status, p.occupation, p.nationality, p.status
-         FROM patients p WHERE p.id = $1`,
-        [patientId],
-      ),
-      query(
-        `SELECT ui.*, ip.name AS provider_name, ip.contact_phone AS provider_phone
-         FROM user_insurances ui
-         JOIN insurance_providers ip ON ip.id = ui.insurance_provider_id
-         WHERE ui.patient_id = $1
-         ORDER BY ui.is_primary DESC, ui.valid_from DESC`,
-        [patientId],
-      ),
-    ]);
+    const patientRes = await query(
+      `SELECT p.id, p.user_id, p.patient_code, p.first_name, p.last_name,
+              p.gender, p.date_of_birth,
+              DATE_PART('year', AGE(p.date_of_birth))::INT AS age,
+              p.blood_type, p.phone, p.email, p.address,
+              p.emergency_contact_name, p.emergency_contact_phone,
+              p.marital_status, p.occupation, p.nationality, p.status
+       FROM patients p WHERE p.id = $1`,
+      [patientId],
+    );
 
     if (patientRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
+
+    const patientUserId = patientRes.rows[0].user_id as number;
+
+    const insuranceRes = await query(
+      `SELECT ui.*, ip.name AS provider_name, ip.contact_phone AS provider_phone
+       FROM user_insurances ui
+       JOIN insurance_providers ip ON ip.id = ui.insurance_provider_id
+       WHERE ui.patient_user_id = $1
+       ORDER BY ui.is_primary DESC, ui.valid_from DESC`,
+      [patientUserId],
+    );
 
     const [encountersRes, countRes] = await Promise.all([
       query(
@@ -662,17 +664,15 @@ export const getPatientEncounters = async (req: Request, res: Response, next: Ne
                 d.specialization AS doctor_specialization,
                 dept.name AS department_name
          FROM encounters e
-         JOIN doctors d ON d.employee_id = e.doctor_id AND d.branch_id = e.doctor_branch_id
+         JOIN doctors d ON d.user_id = e.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
-         LEFT JOIN departments dept ON dept.id = (
-             SELECT department_id FROM appointments WHERE id = e.appointment_id LIMIT 1
-         )
-         WHERE e.patient_id = $1
+         LEFT JOIN departments dept ON dept.id = d.department_id
+         WHERE e.patient_user_id = $1
          ORDER BY e.encounter_date DESC
          LIMIT $2 OFFSET $3`,
-        [patientId, limit, offset],
+        [patientUserId, limit, offset],
       ),
-      query(`SELECT COUNT(*) FROM encounters WHERE patient_id = $1`, [patientId]),
+      query(`SELECT COUNT(*) FROM encounters WHERE patient_user_id = $1`, [patientUserId]),
     ]);
 
     // Attach clinical notes to each encounter
@@ -754,18 +754,21 @@ export const getPatientLabOrders = async (req: Request, res: Response, next: Nex
                   ) ORDER BY loi.id
                 ) FILTER (WHERE loi.id IS NOT NULL) AS tests
          FROM lab_orders lo
-         JOIN doctors d ON d.employee_id = lo.doctor_id AND d.branch_id = lo.doctor_branch_id
+         JOIN patients p ON p.user_id = lo.patient_user_id
+         JOIN doctors d ON d.user_id = lo.doctor_user_id AND d.branch_id = lo.doctor_branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
          LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
-         WHERE lo.patient_id = $3 ${statusClause}
+         WHERE p.id = $3 ${statusClause}
          GROUP BY lo.id, u.first_name, u.last_name, d.specialization
          ORDER BY lo.order_date DESC
          LIMIT $1 OFFSET $2`,
         params,
       ),
       query(
-        `SELECT COUNT(*) FROM lab_orders lo WHERE lo.patient_id = $1 ${countStatusClause}`,
+        `SELECT COUNT(*) FROM lab_orders lo
+         JOIN patients p ON p.user_id = lo.patient_user_id
+         WHERE p.id = $1 ${countStatusClause}`,
         countParams,
       ),
     ]);
@@ -821,18 +824,21 @@ export const getPatientRadiologyOrders = async (req: Request, res: Response, nex
                   ) ORDER BY roi.id
                 ) FILTER (WHERE roi.id IS NOT NULL) AS scans
          FROM radiology_orders ro
-         JOIN doctors d ON d.employee_id = ro.doctor_id AND d.branch_id = ro.doctor_branch_id
+         JOIN patients p ON p.user_id = ro.patient_user_id
+         JOIN doctors d ON d.user_id = ro.doctor_user_id AND d.branch_id = ro.branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
          LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
-         WHERE ro.patient_id = $3 ${statusClause}
+         WHERE p.id = $3 ${statusClause}
          GROUP BY ro.id, u.first_name, u.last_name, d.specialization
          ORDER BY ro.order_date DESC
          LIMIT $1 OFFSET $2`,
         params,
       ),
       query(
-        `SELECT COUNT(*) FROM radiology_orders ro WHERE ro.patient_id = $1 ${countStatusClause}`,
+        `SELECT COUNT(*) FROM radiology_orders ro
+         JOIN patients p ON p.user_id = ro.patient_user_id
+         WHERE p.id = $1 ${countStatusClause}`,
         countParams,
       ),
     ]);
@@ -888,16 +894,22 @@ export const getPatientPrescriptions = async (req: Request, res: Response, next:
                   ) ORDER BY pi.id
                 ) FILTER (WHERE pi.id IS NOT NULL) AS items
          FROM prescriptions p
-         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
+         JOIN patients pt ON pt.user_id = p.patient_user_id
+         JOIN doctors d ON d.user_id = p.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
-         WHERE p.patient_id = $3 ${statusClause}
+         WHERE pt.id = $3 ${statusClause}
          GROUP BY p.id, u.first_name, u.last_name, d.specialization
          ORDER BY p.prescription_date DESC
          LIMIT $1 OFFSET $2`,
         params,
       ),
-      query(`SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1 ${countStatusClause}`, countParams),
+      query(
+        `SELECT COUNT(*) FROM prescriptions p
+         JOIN patients pt ON pt.user_id = p.patient_user_id
+         WHERE pt.id = $1 ${countStatusClause}`,
+        countParams,
+      ),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
@@ -960,12 +972,12 @@ export const getHealthInsights = async (req: Request, res: Response, next: NextF
   try {
     const userId = (req as Request & { user?: { userId: number } }).user?.userId;
 
-    const patResult = await query('SELECT id FROM patients WHERE user_id = $1 LIMIT 1', [userId]);
+    const patResult = await query('SELECT user_id FROM patients WHERE user_id = $1 LIMIT 1', [userId]);
     if (patResult.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
-    const patientId: number = patResult.rows[0].id;
+    const patientUserId: number = patResult.rows[0].user_id;
 
     const [vitalsRes, labRes] = await Promise.all([
       query(
@@ -973,10 +985,10 @@ export const getHealthInsights = async (req: Request, res: Response, next: NextF
                 heart_rate, respiratory_rate, oxygen_saturation,
                 weight, height, bmi, blood_glucose, recorded_at
          FROM vitals
-         WHERE patient_id = $1
+         WHERE patient_user_id = $1
          ORDER BY recorded_at DESC
          LIMIT 1`,
-        [patientId],
+        [patientUserId],
       ),
       query(
         `SELECT DISTINCT ON (ltc.id)
@@ -987,12 +999,12 @@ export const getHealthInsights = async (req: Request, res: Response, next: NextF
          FROM lab_order_items loi
          JOIN lab_orders lo        ON lo.id  = loi.lab_order_id
          JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
-         WHERE lo.patient_id = $1
+         WHERE lo.patient_user_id = $1
            AND loi.result_value IS NOT NULL
            AND loi.status = 'completed'
          ORDER BY ltc.id, loi.result_date DESC
          LIMIT 30`,
-        [patientId],
+        [patientUserId],
       ),
     ]);
 

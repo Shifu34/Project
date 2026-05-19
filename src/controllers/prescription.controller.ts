@@ -7,13 +7,13 @@ export const createPrescription = async (req: Request, res: Response, next: Next
   try {
     await client.query('BEGIN');
 
-    const { encounter_id, patient_id, doctor_id, doctor_branch_id, valid_until, notes, items } = req.body;
+    const { encounter_id, patient_user_id, doctor_user_id, valid_until, notes, items } = req.body;
     // items: [{inventory_item_id?, medication_name, dosage, frequency, duration, quantity, route, instructions}]
 
     const prescRes = await client.query(
-      `INSERT INTO prescriptions (encounter_id, patient_id, doctor_id, doctor_branch_id, valid_until, notes)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [encounter_id, patient_id, doctor_id, doctor_branch_id, valid_until, notes],
+      `INSERT INTO prescriptions (encounter_id, patient_user_id, doctor_user_id, valid_until, notes)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [encounter_id, patient_user_id, doctor_user_id, valid_until, notes],
     );
     const prescription = prescRes.rows[0];
 
@@ -47,9 +47,9 @@ export const getPrescriptionById = async (req: Request, res: Response, next: Nex
         `SELECT p.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 CONCAT(pt.first_name,' ',pt.last_name) AS patient_name, pt.patient_code
          FROM prescriptions p
-         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
+         JOIN doctors d ON d.user_id = p.doctor_user_id
          JOIN users u ON u.id = d.user_id
-         JOIN patients pt ON pt.id = p.patient_id
+         JOIN patients pt ON pt.user_id = p.patient_user_id
          WHERE p.id = $1`,
         [req.params.id],
       ),
@@ -88,7 +88,7 @@ export const getActivePatientMedications = async (req: Request, res: Response, n
       res.status(404).json({ success: false, message: 'Patient not found for this user' });
       return;
     }
-    const patientId = patientRes.rows[0].id;
+    const patientUserId = userId;
 
     const [prescRes, itemsRes] = await Promise.all([
       query(
@@ -96,13 +96,13 @@ export const getActivePatientMedications = async (req: Request, res: Response, n
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 d.specialization
          FROM prescriptions p
-         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
+         JOIN doctors d ON d.user_id = p.doctor_user_id
          JOIN users u ON u.id = d.user_id
-         WHERE p.patient_id = $1
+         WHERE p.patient_user_id = $1
            AND p.status = 'active'
            AND (p.valid_until IS NULL OR p.valid_until >= CURRENT_DATE)
          ORDER BY p.prescription_date DESC`,
-        [patientId],
+        [patientUserId],
       ),
       query(
         `SELECT pi.*, inv.generic_name, inv.dosage_form, inv.strength,
@@ -110,10 +110,10 @@ export const getActivePatientMedications = async (req: Request, res: Response, n
          FROM prescription_items pi
          JOIN prescriptions p ON p.id = pi.prescription_id
          LEFT JOIN inventory_items inv ON inv.id = pi.inventory_item_id
-         WHERE p.patient_id = $1
+         WHERE p.patient_user_id = $1
            AND p.status = 'active'
            AND (p.valid_until IS NULL OR p.valid_until >= CURRENT_DATE)`,
-        [patientId],
+        [patientUserId],
       ),
     ]);
 
@@ -142,23 +142,23 @@ export const getPrescriptions = async (req: Request, res: Response, next: NextFu
   try {
     const page      = Math.max(1, parseInt(req.query.page as string || '1',  10));
     const limit     = Math.min(100, parseInt(req.query.limit as string || '20', 10));
-    const patientId = req.query.patient_id as string | undefined;
+    const patientUserId = req.query.patient_user_id as string | undefined;
     const offset    = (page - 1) * limit;
 
     const params: unknown[] = [limit, offset];
     const countParams: unknown[] = [];
-    const where = patientId ? `WHERE p.patient_id = $3` : '';
-    const countWhere = patientId ? `WHERE p.patient_id = $1` : '';
-    if (patientId) { params.push(patientId); countParams.push(patientId); }
+    const where = patientUserId ? `WHERE p.patient_user_id = $3` : '';
+    const countWhere = patientUserId ? `WHERE p.patient_user_id = $1` : '';
+    if (patientUserId) { params.push(patientUserId); countParams.push(patientUserId); }
 
     const [dataRes, countRes] = await Promise.all([
       query(
         `SELECT p.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 CONCAT(pt.first_name,' ',pt.last_name) AS patient_name, pt.patient_code
          FROM prescriptions p
-         JOIN doctors d ON d.employee_id = p.doctor_id AND d.branch_id = p.doctor_branch_id
+         JOIN doctors d ON d.user_id = p.doctor_user_id
          JOIN users u ON u.id = d.user_id
-         JOIN patients pt ON pt.id = p.patient_id
+         JOIN patients pt ON pt.user_id = p.patient_user_id
          ${where}
          ORDER BY p.prescription_date DESC LIMIT $1 OFFSET $2`,
         params,

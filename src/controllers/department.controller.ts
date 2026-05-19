@@ -21,10 +21,7 @@ export const getDepartments = async (_req: Request, res: Response, next: NextFun
     const result = await query(
       `SELECT d.*, CONCAT(u.first_name,' ',u.last_name) AS head_doctor_name
       FROM departments d
-          LEFT JOIN doctors doc ON doc.employee_id = d.head_doctor_id
-                   AND (d.head_doctor_branch_id IS NULL OR doc.branch_id = d.head_doctor_branch_id)
-                   AND (d.organization_id IS NULL OR doc.organization_id = d.organization_id)
-       LEFT JOIN users u ON u.id = doc.user_id
+       LEFT JOIN users u ON u.id = d.head_user_id
        ORDER BY d.name ASC`,
     );
     res.json({ success: true, data: result.rows });
@@ -39,10 +36,7 @@ export const getDepartmentById = async (req: Request, res: Response, next: NextF
     const result = await query(
       `SELECT d.*, CONCAT(u.first_name,' ',u.last_name) AS head_doctor_name
       FROM departments d
-          LEFT JOIN doctors doc ON doc.employee_id = d.head_doctor_id
-                   AND (d.head_doctor_branch_id IS NULL OR doc.branch_id = d.head_doctor_branch_id)
-                   AND (d.organization_id IS NULL OR doc.organization_id = d.organization_id)
-       LEFT JOIN users u ON u.id = doc.user_id
+       LEFT JOIN users u ON u.id = d.head_user_id
        WHERE d.id = $1`,
       [req.params.id],
     );
@@ -59,11 +53,11 @@ export const getDepartmentById = async (req: Request, res: Response, next: NextF
 // POST /departments
 export const createDepartment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, description, head_doctor_id, head_doctor_branch_id, phone, location } = req.body;
+    const { name, description, branch_id, head_user_id, phone, location } = req.body;
     const result = await query(
-      `INSERT INTO departments (name, description, head_doctor_id, head_doctor_branch_id, phone, location)
+      `INSERT INTO departments (name, description, branch_id, head_user_id, phone, location)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [name, description, head_doctor_id, head_doctor_branch_id, phone, location],
+      [name, description, branch_id, head_user_id ?? null, phone, location],
     );
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {
@@ -74,12 +68,12 @@ export const createDepartment = async (req: Request, res: Response, next: NextFu
 // PUT /departments/:id
 export const updateDepartment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, description, head_doctor_id, head_doctor_branch_id, phone, location, is_active } = req.body;
+    const { name, description, branch_id, head_user_id, phone, location, is_active } = req.body;
     const result = await query(
       `UPDATE departments
-       SET name=$1, description=$2, head_doctor_id=$3, head_doctor_branch_id=$4, phone=$5, location=$6, is_active=$7
+       SET name=$1, description=$2, branch_id=$3, head_user_id=$4, phone=$5, location=$6, is_active=$7
        WHERE id = $8 RETURNING *`,
-      [name, description, head_doctor_id, head_doctor_branch_id, phone, location, is_active, req.params.id],
+      [name, description, branch_id, head_user_id ?? null, phone, location, is_active, req.params.id],
     );
     if (result.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Department not found' });

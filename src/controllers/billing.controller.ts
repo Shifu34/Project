@@ -11,22 +11,22 @@ export const getMyPayments = async (req: AuthRequest, res: Response, next: NextF
     const offset = (page - 1) * limit;
 
     // Resolve patient from authenticated user
-    const patRes = await query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [req.user!.userId]);
+    const patRes = await query(`SELECT user_id FROM patients WHERE user_id = $1 LIMIT 1`, [req.user!.userId]);
     if (patRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Patient profile not found' });
       return;
     }
-    const patientId = patRes.rows[0].id;
+    const patientUserId = patRes.rows[0].user_id;
 
-    const conditions: string[] = [`py.patient_id = $3`];
-    const params: unknown[] = [limit, offset, patientId];
+    const conditions: string[] = [`py.patient_user_id = $3`];
+    const params: unknown[] = [limit, offset, patientUserId];
     let idx = 4;
 
     if (status) { conditions.push(`py.payment_status = $${idx++}`); params.push(status); }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
-    const countParams: unknown[] = [patientId];
-    const countConditions: string[] = [`py.patient_id = $1`];
+    const countParams: unknown[] = [patientUserId];
+    const countConditions: string[] = [`py.patient_user_id = $1`];
     let cidx = 2;
     if (status) { countConditions.push(`py.payment_status = $${cidx++}`); countParams.push(status); }
 
@@ -38,7 +38,7 @@ export const getMyPayments = async (req: AuthRequest, res: Response, next: NextF
                 doc.specialization
          FROM payments py
          LEFT JOIN appointments a ON a.id = py.appointment_id
-         LEFT JOIN doctors doc ON doc.employee_id = a.doctor_id AND doc.branch_id = a.doctor_branch_id
+         LEFT JOIN doctors doc ON doc.user_id = a.doctor_user_id AND doc.branch_id = a.doctor_branch_id
          ${where}
          ORDER BY py.paid_at DESC LIMIT $1 OFFSET $2`,
         params,
@@ -65,7 +65,7 @@ export const getPayments = async (req: Request, res: Response, next: NextFunctio
   try {
     const page      = Math.max(1, parseInt(req.query.page as string || '1',  10));
     const limit     = Math.min(100, parseInt(req.query.limit as string || '20', 10));
-    const patientId = req.query.patient_id as string | undefined;
+    const patientUserId = req.query.patient_user_id as string | undefined;
     const status    = req.query.status    as string | undefined;
     const offset    = (page - 1) * limit;
 
@@ -76,11 +76,11 @@ export const getPayments = async (req: Request, res: Response, next: NextFunctio
     let mainIdx = 3;
     let countIdx = 1;
 
-    if (patientId) {
-      mainConditions.push(`py.patient_id = $${mainIdx++}`);
-      countConditions.push(`py.patient_id = $${countIdx++}`);
-      mainParams.push(patientId);
-      countParams.push(patientId);
+    if (patientUserId) {
+      mainConditions.push(`py.patient_user_id = $${mainIdx++}`);
+      countConditions.push(`py.patient_user_id = $${countIdx++}`);
+      mainParams.push(patientUserId);
+      countParams.push(patientUserId);
     }
     if (status) {
       mainConditions.push(`py.payment_status = $${mainIdx++}`);
@@ -98,7 +98,7 @@ export const getPayments = async (req: Request, res: Response, next: NextFunctio
                 CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
                 CONCAT(u.first_name,' ',u.last_name) AS received_by_name
          FROM payments py
-         JOIN patients p ON p.id = py.patient_id
+         JOIN patients p ON p.user_id = py.patient_user_id
          LEFT JOIN users u ON u.id = py.received_by
          ${mainWhere}
          ORDER BY py.paid_at DESC LIMIT $1 OFFSET $2`,
@@ -123,7 +123,7 @@ export const getPaymentById = async (req: Request, res: Response, next: NextFunc
                 CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
                 CONCAT(u.first_name,' ',u.last_name) AS received_by_name
          FROM payments py
-         JOIN patients p ON p.id = py.patient_id
+         JOIN patients p ON p.user_id = py.patient_user_id
          LEFT JOIN users u ON u.id = py.received_by
          WHERE py.id = $1`,
         [req.params.id],
@@ -142,7 +142,7 @@ export const getPaymentById = async (req: Request, res: Response, next: NextFunc
 };
 
 // POST /billing/payments  — patient only
-// patient_id is resolved automatically from the authenticated user.
+// patient_user_id is resolved automatically from the authenticated user.
 // Body: appointment_id, amount*, payment_method, transaction_reference,
 //       payment_status, paid_at, notes
 export const recordPayment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -157,27 +157,27 @@ export const recordPayment = async (req: AuthRequest, res: Response, next: NextF
       notes,
     } = req.body;
 
-    // Accept explicit patient_id from body, otherwise resolve from token
-    let patientId: number;
-    if (req.body.patient_id) {
-      patientId = parseInt(req.body.patient_id, 10);
+    // Accept explicit patient_user_id from body, otherwise resolve from token
+    let patientUserId: number;
+    if (req.body.patient_user_id) {
+      patientUserId = parseInt(req.body.patient_user_id, 10);
     } else {
-      const patRes = await query(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [req.user!.userId]);
+      const patRes = await query(`SELECT user_id FROM patients WHERE user_id = $1 LIMIT 1`, [req.user!.userId]);
       if (patRes.rows.length === 0) {
         res.status(404).json({ success: false, message: 'Patient profile not found' });
         return;
       }
-      patientId = patRes.rows[0].id;
+      patientUserId = patRes.rows[0].user_id;
     }
 
     const result = await query(
       `INSERT INTO payments
-         (appointment_id, patient_id, amount, payment_method, transaction_reference,
+         (appointment_id, patient_user_id, amount, payment_method, transaction_reference,
           payment_status, paid_at, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [
         appointment_id        ?? null,
-        patientId,
+        patientUserId,
         amount,
         payment_method        ?? null,
         transaction_reference ?? null,
@@ -243,20 +243,20 @@ export const processPayment = async (req: AuthRequest, res: Response, next: Next
 
     // Resolve patient from authenticated user
     const patRes = await query(
-      `SELECT id FROM patients WHERE user_id = $1 LIMIT 1`,
+      `SELECT user_id FROM patients WHERE user_id = $1 LIMIT 1`,
       [req.user!.userId],
     );
     if (patRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Patient profile not found' });
       return;
     }
-    const patientId = patRes.rows[0].id;
+    const patientUserId = patRes.rows[0].user_id;
 
     // Verify appointment exists and belongs to this patient
     const apptRes = await query(
-      `SELECT a.id, a.status, a.patient_id, COALESCE(d.consultation_fee, 0) AS consultation_fee
+      `SELECT a.id, a.status, a.patient_user_id, COALESCE(d.consultation_fee, 0) AS consultation_fee
        FROM appointments a
-      JOIN doctors d ON d.employee_id = a.doctor_id AND d.branch_id = a.doctor_branch_id
+      JOIN doctors d ON d.user_id = a.doctor_user_id AND d.branch_id = a.doctor_branch_id
        WHERE a.id = $1 LIMIT 1`,
       [appointment_id],
     );
@@ -265,7 +265,7 @@ export const processPayment = async (req: AuthRequest, res: Response, next: Next
       return;
     }
     const appointment = apptRes.rows[0];
-    if (appointment.patient_id !== patientId) {
+    if (appointment.patient_user_id !== patientUserId) {
       res.status(403).json({ success: false, message: 'Appointment does not belong to this patient' });
       return;
     }
@@ -296,12 +296,12 @@ export const processPayment = async (req: AuthRequest, res: Response, next: Next
 
       const payResult = await client.query(
         `INSERT INTO payments
-           (appointment_id, patient_id, amount, payment_method, transaction_reference,
+           (appointment_id, patient_user_id, amount, payment_method, transaction_reference,
             payment_status, notes)
          VALUES ($1, $2, $3, $4, $5, 'completed', $6) RETURNING *`,
         [
           appointment_id,
-          patientId,
+          patientUserId,
           appointment.consultation_fee,
           dbMethod,
           mockTransactionId,

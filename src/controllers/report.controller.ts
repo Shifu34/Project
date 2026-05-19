@@ -33,14 +33,10 @@ export const getReportById = async (req: Request, res: Response, next: NextFunct
                 ro.priority        AS radiology_priority,
                 ro.status          AS radiology_status
          FROM medical_reports mr
-         JOIN patients p ON p.id = mr.patient_id
-         LEFT JOIN doctors d ON d.employee_id = mr.doctor_id AND d.branch_id = mr.doctor_branch_id
+             JOIN patients p ON p.user_id = mr.patient_user_id
+             LEFT JOIN doctors d ON d.user_id = mr.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
-         LEFT JOIN departments dept ON dept.id = (
-             SELECT department_id FROM appointments
-             WHERE id = (SELECT appointment_id FROM encounters WHERE id = mr.encounter_id LIMIT 1)
-             LIMIT 1
-         )
+             LEFT JOIN departments dept ON dept.id = d.department_id
          LEFT JOIN encounters e ON e.id = mr.encounter_id
          LEFT JOIN lab_orders lo ON lo.id = mr.lab_order_id
          LEFT JOIN radiology_orders ro ON ro.id = mr.radiology_order_id
@@ -105,12 +101,12 @@ export const getReportById = async (req: Request, res: Response, next: NextFunct
   }
 };
 
-// GET /reports?patient_id=&type=&page=&limit=  – list reports with basic info
+// GET /reports?patient_user_id=&type=&page=&limit=  – list reports with basic info
 export const getReports = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const page      = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
     const limit     = Math.min(100, parseInt(req.query.limit as string || '20', 10));
-    const patientId = req.query.patient_id as string | undefined;
+    const patientUserId = req.query.patient_user_id as string | undefined;
     const type      = req.query.type       as string | undefined;
     const offset    = (page - 1) * limit;
 
@@ -118,7 +114,7 @@ export const getReports = async (req: Request, res: Response, next: NextFunction
     const conditions: string[] = [];
     let idx = 3;
 
-    if (patientId) { conditions.push(`mr.patient_id = $${idx++}`); params.push(patientId); }
+    if (patientUserId) { conditions.push(`mr.patient_user_id = $${idx++}`); params.push(patientUserId); }
     if (type)      { conditions.push(`mr.report_type = $${idx++}`); params.push(type); }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -134,8 +130,8 @@ export const getReports = async (req: Request, res: Response, next: NextFunction
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 (SELECT COUNT(*) FROM report_files rf WHERE rf.report_id = mr.id) AS file_count
          FROM medical_reports mr
-         JOIN patients p ON p.id = mr.patient_id
-         LEFT JOIN doctors d ON d.employee_id = mr.doctor_id AND d.branch_id = mr.doctor_branch_id
+         JOIN patients p ON p.user_id = mr.patient_user_id
+         LEFT JOIN doctors d ON d.user_id = mr.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          ${where}
          ORDER BY mr.report_date DESC, mr.created_at DESC
@@ -241,8 +237,8 @@ export const summarizeReport = async (req: Request, res: Response, next: NextFun
               e.assessment,
               e.plan
        FROM medical_reports mr
-       JOIN patients p ON p.id = mr.patient_id
-      LEFT JOIN doctors d ON d.employee_id = mr.doctor_id AND d.branch_id = mr.doctor_branch_id
+        JOIN patients p ON p.user_id = mr.patient_user_id
+            LEFT JOIN doctors d ON d.user_id = mr.doctor_user_id
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN encounters e ON e.id = mr.encounter_id
        WHERE mr.id = $1`,

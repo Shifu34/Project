@@ -16,9 +16,8 @@ router.get('/:id/vitals',      visitCtrl.getEncounterVitals);
 
 router.post('/',
   authorize('admin', 'doctor'),
-  body('patient_id').isInt(),
-  body('doctor_id').isInt(),
-  body('doctor_branch_id').isInt(),
+  body('patient_user_id').isInt(),
+  body('doctor_user_id').isInt(),
   validate,
   visitCtrl.createVisit,
 );
@@ -27,16 +26,15 @@ router.put('/:id', authorize('admin', 'doctor'), validate, visitCtrl.updateVisit
 
 router.post('/:id/vitals',
   authorize('admin', 'doctor'),
-  body('patient_id').isInt(),
+  body('patient_user_id').isInt(),
   validate,
   visitCtrl.recordVitalSigns,
 );
 
 router.post('/:id/diagnoses',
   authorize('admin', 'doctor'),
-  body('patient_id').isInt(),
-  body('doctor_id').isInt(),
-  body('doctor_branch_id').isInt(),
+  body('patient_user_id').isInt(),
+  body('doctor_user_id').isInt(),
   body('diagnosis_text').notEmpty(),
   validate,
   visitCtrl.addDiagnosis,

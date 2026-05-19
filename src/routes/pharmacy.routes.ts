@@ -43,7 +43,7 @@ router.get('/revenue', pharmCtrl.getInventoryRevenue);
 
 router.post('/orders',
   authorize('admin', 'doctor'),
-  body('patient_id').isInt().withMessage('patient_id is required'),
+  body('patient_user_id').isInt().withMessage('patient_user_id is required'),
   body('inventory_item_id').isInt().withMessage('inventory_item_id is required'),
   body('quantity').isInt({ min: 1 }).withMessage('quantity must be a positive integer'),
   body('unit_price').isFloat({ min: 0 }).withMessage('unit_price is required'),
