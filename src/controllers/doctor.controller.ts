@@ -708,15 +708,39 @@ export const getDoctorScheduleByDate = async (req: Request, res: Response, next:
   }
 };
 
-// POST /doctors/:id/profile
+// POST /update-doctor-profile?doctor_user_id=...&doctor_branch_id=...
 export const upsertDoctorProfileByDoctor = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const doctorId = parseInt(req.params.id, 10);
-    const branchId = getBranchIdFromRequest(req);
-    if (!branchId) {
-      res.status(400).json({ success: false, message: 'branch_id is required' });
+    const doctorUserIdRaw = req.query.doctor_user_id ?? req.query.user_id ?? req.body.doctor_user_id ?? req.body.user_id;
+    const doctorUserId = Number(doctorUserIdRaw);
+    if (!Number.isFinite(doctorUserId) || doctorUserId <= 0) {
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
       return;
     }
+
+    const branchIdRaw = req.query.doctor_branch_id ?? req.query.branch_id ?? req.body.doctor_branch_id ?? req.body.branch_id;
+    const branchId = branchIdRaw !== undefined && branchIdRaw !== null && branchIdRaw !== ''
+      ? Number(branchIdRaw)
+      : null;
+    if (!branchId || !Number.isFinite(branchId) || branchId <= 0) {
+      res.status(400).json({ success: false, message: 'doctor_branch_id is required' });
+      return;
+    }
+
+    const doctorRow = await query(
+      `SELECT employee_id
+       FROM doctors
+       WHERE user_id = $1 AND branch_id = $2
+       LIMIT 1`,
+      [doctorUserId, branchId],
+    );
+
+    if (doctorRow.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
+    const doctorId = Number(doctorRow.rows[0].employee_id);
 
     const allowed = await canDoctorManageProfile(req, doctorId, branchId);
     if (!allowed) {

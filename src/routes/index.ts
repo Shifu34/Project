@@ -18,8 +18,8 @@ import callTranscriptionRoutes   from './call-transcription.routes';
 import organizationRoutes        from './organization.routes';
 import notificationRoutes        from './notification.routes';
 import { getDashboardStats } from '../controllers/dashboard.controller';
-import { getDoctorProfile } from '../controllers/doctor.controller';
-import { authenticate }   from '../middleware/auth.middleware';
+import { getDoctorProfile, upsertDoctorProfileByDoctor } from '../controllers/doctor.controller';
+import { authenticate, authorize }   from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -43,6 +43,7 @@ router.use('/call-transcriptions',  callTranscriptionRoutes);
 router.use('/organizations',        organizationRoutes);
 router.use('/notifications',        notificationRoutes);
 router.get('/doctor-profile', authenticate, getDoctorProfile);
+router.post('/update-doctor-profile', authenticate, authorize('admin', 'doctor'), upsertDoctorProfileByDoctor);
 router.get('/dashboard',     authenticate, getDashboardStats);
 
 export default router;

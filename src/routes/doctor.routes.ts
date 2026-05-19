@@ -14,7 +14,6 @@ router.get('/specializations', doctorCtrl.getAllSpecializations);
 router.get('/stats/departments', doctorCtrl.getDoctorDeptStats);
 router.get('/',    doctorCtrl.getDoctors);
 router.get('/me',  doctorCtrl.getDoctorByUserId);
-router.get('/:id/profile', doctorCtrl.getDoctorProfile);
 router.get('/:id/schedule', doctorCtrl.getDoctorScheduleByDate);
 router.get('/:id/available-slots', doctorCtrl.getDoctorAvailableSlots);
 router.get('/:id/booked-appointments', doctorCtrl.getDoctorBookedAppointments);
@@ -32,12 +31,6 @@ router.post('/',
 );
 
 router.put('/:id', authorize('admin', 'doctor'), validate, doctorCtrl.updateDoctor);
-
-router.post('/:id/profile',
-  authorize('admin', 'doctor'),
-  validate,
-  doctorCtrl.upsertDoctorProfileByDoctor,
-);
 
 router.post('/:id/schedule',
   authorize('admin', 'doctor'),
