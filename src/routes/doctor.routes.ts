@@ -14,8 +14,6 @@ router.get('/specializations', doctorCtrl.getAllSpecializations);
 router.get('/stats/departments', doctorCtrl.getDoctorDeptStats);
 router.get('/',    doctorCtrl.getDoctors);
 router.get('/me',  doctorCtrl.getDoctorByUserId);
-router.get('/:id/schedule', doctorCtrl.getDoctorScheduleByDate);
-router.get('/:id/available-slots', doctorCtrl.getDoctorAvailableSlots);
 router.get('/:id/booked-appointments', doctorCtrl.getDoctorBookedAppointments);
 router.get('/:id/specialization', doctorCtrl.getDoctorSpecialization);
 router.get('/:id', doctorCtrl.getDoctorById);
@@ -31,22 +29,5 @@ router.post('/',
 );
 
 router.put('/:id', authorize('admin', 'doctor'), validate, doctorCtrl.updateDoctor);
-
-router.post('/:id/schedule',
-  authorize('admin', 'doctor'),
-  body('schedules').isArray({ min: 1 }).withMessage('schedules must be a non-empty array'),
-  validate,
-  doctorCtrl.addDoctorSchedule,
-);
-
-router.delete('/schedule/:scheduleId',
-  authorize('admin', 'doctor'),
-  doctorCtrl.deleteDoctorSchedule,
-);
-
-router.patch('/schedule/:scheduleId',
-  authorize('admin', 'doctor'),
-  doctorCtrl.updateDoctorSchedule,
-);
 
 export default router;

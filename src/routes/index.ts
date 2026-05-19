@@ -18,7 +18,15 @@ import callTranscriptionRoutes   from './call-transcription.routes';
 import organizationRoutes        from './organization.routes';
 import notificationRoutes        from './notification.routes';
 import { getDashboardStats } from '../controllers/dashboard.controller';
-import { getDoctorProfile, upsertDoctorProfileByDoctor } from '../controllers/doctor.controller';
+import {
+	addDoctorSchedule,
+	deleteDoctorSchedule,
+	getDoctorAvailableSlots,
+	getDoctorProfile,
+	getDoctorScheduleByDate,
+	updateDoctorSchedule,
+	upsertDoctorProfileByDoctor,
+} from '../controllers/doctor.controller';
 import { authenticate, authorize }   from '../middleware/auth.middleware';
 
 const router = Router();
@@ -44,6 +52,11 @@ router.use('/organizations',        organizationRoutes);
 router.use('/notifications',        notificationRoutes);
 router.get('/doctor-profile', authenticate, getDoctorProfile);
 router.post('/update-doctor-profile', authenticate, authorize('admin', 'doctor'), upsertDoctorProfileByDoctor);
+router.get('/doctor-schedule', authenticate, getDoctorScheduleByDate);
+router.get('/doctor-available-slots', authenticate, getDoctorAvailableSlots);
+router.post('/add-doctor-schedule', authenticate, authorize('admin', 'doctor'), addDoctorSchedule);
+router.patch('/update-doctor-schedule', authenticate, authorize('admin', 'doctor'), updateDoctorSchedule);
+router.delete('/delete-doctor-schedule', authenticate, authorize('admin', 'doctor'), deleteDoctorSchedule);
 router.get('/dashboard',     authenticate, getDashboardStats);
 
 export default router;

@@ -10,6 +10,38 @@ const getBranchIdFromRequest = (req: Request): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const getDoctorUserIdFromRequest = (req: Request): number | null => {
+  const raw = (
+    req.query.doctor_user_id ?? req.query.user_id ??
+    req.body.doctor_user_id ?? req.body.user_id ??
+    req.params.id
+  ) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getDoctorBranchIdFromRequest = (req: Request): number | null => {
+  const raw = (
+    req.query.doctor_branch_id ?? req.query.branch_id ??
+    req.body.doctor_branch_id ?? req.body.branch_id
+  ) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getScheduleIdFromRequest = (req: Request): number | null => {
+  const raw = (
+    req.query.schedule_id ?? req.query.scheduleId ??
+    req.body.schedule_id ?? req.body.scheduleId ??
+    req.params.scheduleId
+  ) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 const getDoctorUserId = async (employeeId: number, branchId: number): Promise<number | null> => {
   const result = await query(
     `SELECT user_id FROM doctors WHERE employee_id = $1 AND branch_id = $2 LIMIT 1`,
@@ -660,27 +692,69 @@ export const getDoctorProfile = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// GET /doctors/:id/schedule
+// GET /doctor-schedule?doctor_user_id=...&doctor_branch_id=...
+// If doctor_branch_id is omitted, returns schedules across all branches.
 export const getDoctorScheduleByDate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const branchId = getBranchIdFromRequest(req);
-    if (!branchId) {
-      res.status(400).json({ success: false, message: 'branch_id is required' });
+    const doctorUserId = getDoctorUserIdFromRequest(req);
+    if (!doctorUserId) {
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
       return;
     }
 
-    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
-    if (!doctorUserId) {
+    const branchId = getDoctorBranchIdFromRequest(req);
+
+    const doctorRes = await query(
+      `SELECT employee_id, branch_id
+       FROM doctors
+       WHERE user_id = $1${branchId ? ' AND branch_id = $2' : ''}
+       ${branchId ? '' : 'ORDER BY branch_id'}`,
+      branchId ? [doctorUserId, branchId] : [doctorUserId],
+    );
+
+    if (doctorRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Doctor not found' });
       return;
     }
 
+    if (branchId) {
+      const result = await query(
+        `SELECT id, doctor_user_id, doctor_branch_id, day_of_week, appointment_type,
+                start_time, end_time, max_appointments, is_available
+         FROM doctor_schedules
+          WHERE doctor_user_id = $1 AND doctor_branch_id = $2
+         ORDER BY
+           CASE day_of_week
+             WHEN 'Monday'    THEN 1
+             WHEN 'Tuesday'   THEN 2
+             WHEN 'Wednesday' THEN 3
+             WHEN 'Thursday'  THEN 4
+             WHEN 'Friday'    THEN 5
+             WHEN 'Saturday'  THEN 6
+             WHEN 'Sunday'    THEN 7
+           END,
+           start_time ASC`,
+        [doctorUserId, branchId],
+      );
+
+      res.json({
+        success: true,
+        data: {
+          doctor_id: Number(doctorRes.rows[0].employee_id),
+          doctor_user_id: doctorUserId,
+          doctor_branch_id: branchId,
+          schedules: result.rows,
+        },
+      });
+      return;
+    }
+
     const result = await query(
-      `SELECT id, doctor_user_id, day_of_week, appointment_type,
+      `SELECT id, doctor_user_id, doctor_branch_id, day_of_week, appointment_type,
               start_time, end_time, max_appointments, is_available
        FROM doctor_schedules
-        WHERE doctor_user_id = $1 AND doctor_branch_id = $2
-       ORDER BY
+        WHERE doctor_user_id = $1
+       ORDER BY doctor_branch_id ASC,
          CASE day_of_week
            WHEN 'Monday'    THEN 1
            WHEN 'Tuesday'   THEN 2
@@ -691,18 +765,10 @@ export const getDoctorScheduleByDate = async (req: Request, res: Response, next:
            WHEN 'Sunday'    THEN 7
          END,
          start_time ASC`,
-      [doctorUserId, branchId],
+      [doctorUserId],
     );
 
-    res.json({
-      success: true,
-      data: {
-        doctor_id: Number(req.params.id),
-        doctor_user_id: doctorUserId,
-        doctor_branch_id: branchId,
-        schedules: result.rows,
-      },
-    });
+    res.json({ success: true, data: result.rows });
   } catch (err) {
     next(err);
   }
@@ -816,26 +882,40 @@ export const upsertDoctorProfileByDoctor = async (req: AuthRequest, res: Respons
   }
 };
 
-// POST /doctors/:id/schedule
+// POST /add-doctor-schedule?doctor_user_id=...&doctor_branch_id=...
 // Accepts: { schedules: [{ day, start_time, end_time, slot_duration, appointment_type }] }
 export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const doctorId = parseInt(req.params.id, 10);
-    const branchId = getBranchIdFromRequest(req);
-    if (!branchId) {
-      res.status(400).json({ success: false, message: 'branch_id is required' });
+    const doctorUserId = getDoctorUserIdFromRequest(req);
+    if (!doctorUserId) {
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
       return;
     }
+
+    const branchId = getDoctorBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'doctor_branch_id is required' });
+      return;
+    }
+
+    const doctorRes = await query(
+      `SELECT employee_id
+       FROM doctors
+       WHERE user_id = $1 AND branch_id = $2
+       LIMIT 1`,
+      [doctorUserId, branchId],
+    );
+
+    if (doctorRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
+    const doctorId = Number(doctorRes.rows[0].employee_id);
 
     const allowed = await canDoctorManageProfile(req, doctorId, branchId);
     if (!allowed) {
       res.status(403).json({ success: false, message: 'You can only manage your own schedule' });
-      return;
-    }
-
-    const doctorUserId = await getDoctorUserId(doctorId, branchId);
-    if (!doctorUserId) {
-      res.status(404).json({ success: false, message: 'Doctor not found' });
       return;
     }
 
@@ -908,86 +988,177 @@ export const addDoctorSchedule = async (req: AuthRequest, res: Response, next: N
   }
 };
 
-// GET /doctors/:id/available-slots?date=YYYY-MM-DD
+// GET /doctor-available-slots?doctor_user_id=...&doctor_branch_id=...&date=YYYY-MM-DD
+// If doctor_branch_id is omitted, returns slots across all branches.
 export const getDoctorAvailableSlots = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const doctorId = req.params.id;
-    const branchId = getBranchIdFromRequest(req);
-    if (!branchId) {
-      res.status(400).json({ success: false, message: 'branch_id is required' });
-      return;
-    }
-    const doctorUserId = await getDoctorUserId(Number(doctorId), branchId);
+    const doctorUserId = getDoctorUserIdFromRequest(req);
     if (!doctorUserId) {
-      res.status(404).json({ success: false, message: 'Doctor not found' });
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
       return;
     }
+
+    const branchId = getDoctorBranchIdFromRequest(req);
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
 
     const d = new Date(`${date}T00:00:00`);
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const dayOfWeek = dayNames[d.getDay()];
 
-    const [scheduleRes, bookedRes] = await Promise.all([
-      query(
-        `SELECT id, appointment_type, start_time, end_time
-         FROM doctor_schedules
-         WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND day_of_week = $3 AND is_available = true`,
-        [doctorUserId, branchId, dayOfWeek],
-      ),
-      query(
-        `SELECT appointment_time
-         FROM appointments
-         WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND appointment_date = $3
-           AND status NOT IN ('cancelled', 'no_show')`,
-        [doctorUserId, branchId, date],
-      ),
-    ]);
+    const buildAvailableSlots = (
+      scheduleRows: Array<{ id: number; appointment_type: string; start_time: string; end_time: string }>,
+      bookedRows: Array<{ appointment_time: string }>,
+    ) => {
+      const bookedTimes = new Set(
+        bookedRows.map(r => String(r.appointment_time).slice(0, 5)),
+      );
 
-    const bookedTimes = new Set(
-      bookedRes.rows.map(r => String(r.appointment_time).slice(0, 5)),
-    );
+      const availableSlots: { schedule_id: number; appointment_type: string; time: string }[] = [];
 
-    const availableSlots: { schedule_id: number; appointment_type: string; time: string }[] = [];
+      for (const sched of scheduleRows) {
+        const [sh, sm] = String(sched.start_time).split(':').map(Number);
+        const [eh, em] = String(sched.end_time).split(':').map(Number);
+        let current = sh * 60 + sm;
+        const end = eh * 60 + em;
 
-    for (const sched of scheduleRes.rows) {
-      const [sh, sm] = String(sched.start_time).split(':').map(Number);
-      const [eh, em] = String(sched.end_time).split(':').map(Number);
-      let current = sh * 60 + sm;
-      const end = eh * 60 + em;
-
-      while (current + 30 <= end) {
-        const hh = String(Math.floor(current / 60)).padStart(2, '0');
-        const mm = String(current % 60).padStart(2, '0');
-        const timeStr = `${hh}:${mm}`;
-        if (!bookedTimes.has(timeStr)) {
-          availableSlots.push({ schedule_id: sched.id, appointment_type: sched.appointment_type, time: timeStr });
+        while (current + 30 <= end) {
+          const hh = String(Math.floor(current / 60)).padStart(2, '0');
+          const mm = String(current % 60).padStart(2, '0');
+          const timeStr = `${hh}:${mm}`;
+          if (!bookedTimes.has(timeStr)) {
+            availableSlots.push({ schedule_id: sched.id, appointment_type: sched.appointment_type, time: timeStr });
+          }
+          current += 30;
         }
-        current += 30;
       }
+
+      return availableSlots;
+    };
+
+    if (branchId) {
+      const doctorRes = await query(
+        `SELECT employee_id
+         FROM doctors
+         WHERE user_id = $1 AND branch_id = $2
+         LIMIT 1`,
+        [doctorUserId, branchId],
+      );
+
+      if (doctorRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Doctor not found' });
+        return;
+      }
+
+      const [scheduleRes, bookedRes] = await Promise.all([
+        query(
+          `SELECT id, appointment_type, start_time, end_time
+           FROM doctor_schedules
+           WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND day_of_week = $3 AND is_available = true`,
+          [doctorUserId, branchId, dayOfWeek],
+        ),
+        query(
+          `SELECT appointment_time
+           FROM appointments
+           WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND appointment_date = $3
+             AND status NOT IN ('cancelled', 'no_show')`,
+          [doctorUserId, branchId, date],
+        ),
+      ]);
+
+      const availableSlots = buildAvailableSlots(scheduleRes.rows, bookedRes.rows);
+
+      res.json({
+        success: true,
+        data: {
+          doctor_id: Number(doctorRes.rows[0].employee_id),
+          doctor_user_id: doctorUserId,
+          doctor_branch_id: branchId,
+          date,
+          day_of_week: dayOfWeek,
+          available_slots: availableSlots,
+        },
+      });
+      return;
     }
 
-    res.json({
-      success: true,
-      data: { doctor_id: Number(doctorId), doctor_user_id: doctorUserId, doctor_branch_id: branchId, date, day_of_week: dayOfWeek, available_slots: availableSlots },
-    });
+    const branchesRes = await query(
+      `SELECT employee_id, branch_id
+       FROM doctors
+       WHERE user_id = $1
+       ORDER BY branch_id`,
+      [doctorUserId],
+    );
+
+    if (branchesRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
+      return;
+    }
+
+    const results = await Promise.all(
+      branchesRes.rows.map(async (row) => {
+        const branch = Number(row.branch_id);
+        const [scheduleRes, bookedRes] = await Promise.all([
+          query(
+            `SELECT id, appointment_type, start_time, end_time
+             FROM doctor_schedules
+             WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND day_of_week = $3 AND is_available = true`,
+            [doctorUserId, branch, dayOfWeek],
+          ),
+          query(
+            `SELECT appointment_time
+             FROM appointments
+             WHERE doctor_user_id = $1 AND doctor_branch_id = $2 AND appointment_date = $3
+               AND status NOT IN ('cancelled', 'no_show')`,
+            [doctorUserId, branch, date],
+          ),
+        ]);
+
+        return {
+          doctor_id: Number(row.employee_id),
+          doctor_user_id: doctorUserId,
+          doctor_branch_id: branch,
+          date,
+          day_of_week: dayOfWeek,
+          available_slots: buildAvailableSlots(scheduleRes.rows, bookedRes.rows),
+        };
+      }),
+    );
+
+    res.json({ success: true, data: results });
   } catch (err) {
     next(err);
   }
 };
 
-// PATCH /doctors/schedule/:scheduleId  — partial update by schedule id
+// PATCH /update-doctor-schedule?doctor_user_id=...&doctor_branch_id=...&schedule_id=...
 export const updateDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const scheduleId = parseInt(req.params.scheduleId, 10);
+    const scheduleId = getScheduleIdFromRequest(req);
+    if (!scheduleId) {
+      res.status(400).json({ success: false, message: 'schedule_id is required' });
+      return;
+    }
 
-    const scheduleRes = await query(`SELECT * FROM doctor_schedules WHERE id = $1`, [scheduleId]);
+    const doctorUserId = getDoctorUserIdFromRequest(req);
+    if (!doctorUserId) {
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
+      return;
+    }
+
+    const branchId = getDoctorBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'doctor_branch_id is required' });
+      return;
+    }
+
+    const scheduleRes = await query(
+      `SELECT * FROM doctor_schedules WHERE id = $1 AND doctor_user_id = $2 AND doctor_branch_id = $3`,
+      [scheduleId, doctorUserId, branchId],
+    );
     if (scheduleRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Schedule not found' });
       return;
     }
-
-    const doctorUserId = scheduleRes.rows[0].doctor_user_id;
     const isAdmin = req.user?.roleName === 'admin' || req.user?.roleName === 'super_admin';
     if (!isAdmin && req.user?.userId !== doctorUserId) {
       res.status(403).json({ success: false, message: 'You can only update your own schedule' });
@@ -1035,18 +1206,35 @@ export const updateDoctorSchedule = async (req: AuthRequest, res: Response, next
   }
 };
 
-// DELETE /doctors/schedule/:scheduleId
+// DELETE /delete-doctor-schedule?doctor_user_id=...&doctor_branch_id=...&schedule_id=...
 export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const scheduleId = parseInt(req.params.scheduleId, 10);
+    const scheduleId = getScheduleIdFromRequest(req);
+    if (!scheduleId) {
+      res.status(400).json({ success: false, message: 'schedule_id is required' });
+      return;
+    }
 
-    const scheduleRes = await query(`SELECT * FROM doctor_schedules WHERE id = $1`, [scheduleId]);
+    const doctorUserId = getDoctorUserIdFromRequest(req);
+    if (!doctorUserId) {
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
+      return;
+    }
+
+    const branchId = getDoctorBranchIdFromRequest(req);
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'doctor_branch_id is required' });
+      return;
+    }
+
+    const scheduleRes = await query(
+      `SELECT * FROM doctor_schedules WHERE id = $1 AND doctor_user_id = $2 AND doctor_branch_id = $3`,
+      [scheduleId, doctorUserId, branchId],
+    );
     if (scheduleRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Schedule not found' });
       return;
     }
-
-    const doctorUserId = scheduleRes.rows[0].doctor_user_id;
     const isAdmin = req.user?.roleName === 'admin' || req.user?.roleName === 'super_admin';
     if (!isAdmin && req.user?.userId !== doctorUserId) {
       res.status(403).json({ success: false, message: 'You can only delete your own schedule' });
