@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { body } from 'express-validator';
 import * as apptCtrl from '../controllers/appointment.controller';
 import { getAppointmentSmart } from '../controllers/visit.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
