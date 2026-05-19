@@ -35,8 +35,8 @@ const getDashboardStats = async (_req, res, next) => {
                     CONCAT(p.first_name,' ',p.last_name) AS patient_name,
                     CONCAT(u.first_name,' ',u.last_name) AS doctor_name
              FROM appointments a
-             JOIN patients p ON p.id = a.patient_id
-             JOIN doctors d ON d.id = a.doctor_id
+             JOIN patients p ON p.user_id = a.patient_user_id
+             JOIN doctors d ON d.user_id = a.doctor_user_id AND d.branch_id = a.doctor_branch_id
              JOIN users u ON u.id = d.user_id
              WHERE a.appointment_date = CURRENT_DATE
              ORDER BY a.appointment_time ASC
@@ -45,8 +45,8 @@ const getDashboardStats = async (_req, res, next) => {
                     CONCAT(p.first_name,' ',p.last_name) AS patient_name,
                     CONCAT(u.first_name,' ',u.last_name) AS doctor_name
              FROM encounters e
-             JOIN patients p ON p.id = e.patient_id
-             JOIN doctors d ON d.id = e.doctor_id
+             JOIN patients p ON p.user_id = e.patient_user_id
+             JOIN doctors d ON d.user_id = e.doctor_user_id
              JOIN users u ON u.id = d.user_id
              WHERE e.status = 'in_progress'
              ORDER BY e.encounter_date DESC

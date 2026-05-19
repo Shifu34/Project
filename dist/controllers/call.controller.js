@@ -81,7 +81,7 @@ const createCallRoom = async (req, res, next) => {
             return;
         }
         // 1. Fetch appointment ------------------------------------------------
-        const apptResult = await (0, database_1.query)(`SELECT a.id, a.patient_id, a.doctor_id, a.appointment_type, a.reason,
+        const apptResult = await (0, database_1.query)(`SELECT a.id, a.patient_user_id, a.doctor_user_id, a.doctor_branch_id, a.appointment_type, a.reason,
               p.first_name || ' ' || p.last_name AS patient_name,
               d.first_name || ' ' || d.last_name AS doctor_name,
               d.user_id AS doctor_user_id,
@@ -89,8 +89,8 @@ const createCallRoom = async (req, res, next) => {
               r.name AS doctor_role_name,
               u.email AS doctor_email
        FROM appointments a
-       JOIN patients p ON p.id = a.patient_id
-       JOIN doctors  d ON d.id = a.doctor_id
+       JOIN patients p ON p.user_id = a.patient_user_id
+       JOIN doctors  d ON d.user_id = a.doctor_user_id AND d.branch_id = a.doctor_branch_id
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN roles r ON r.id = u.role_id
        WHERE a.id = $1`, [appointment_id]);
@@ -106,7 +106,7 @@ const createCallRoom = async (req, res, next) => {
             return;
         }
         // 2. Create 100ms room ------------------------------------------------
-        const roomName = `${appt.id}-${appt.doctor_id}-${appt.patient_id}`;
+        const roomName = `${appt.id}-${appt.doctor_user_id}-${appt.patient_user_id}`;
         const description = `${appt.appointment_type || 'Consultation'}${appt.reason ? ' - ' + appt.reason : ''}`;
         const roomRes = await hmsRequest('POST', '/v2/rooms', {
             name: roomName,
@@ -126,9 +126,9 @@ const createCallRoom = async (req, res, next) => {
         }
         // 4. Persist to DB ----------------------------------------------------
         const insertResult = await (0, database_1.query)(`INSERT INTO video_call_rooms
-         (appointment_id, patient_id, doctor_id, room_id, patient_room_code, doctor_room_code)
+         (appointment_id, patient_user_id, doctor_user_id, room_id, patient_room_code, doctor_room_code)
        VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`, [appointment_id, appt.patient_id, appt.doctor_id, roomId, patientRoomCode, doctorRoomCode]);
+       RETURNING *`, [appointment_id, appt.patient_user_id, appt.doctor_user_id, roomId, patientRoomCode, doctorRoomCode]);
         // 5. Notify FDA agent — awaited so registration completes BEFORE
         //    room codes are returned to Flutter (Flutter must not connect first)
         try {
@@ -144,8 +144,8 @@ const createCallRoom = async (req, res, next) => {
             await httpPost('mh-fda-agent-production-3e20.up.railway.app', '/register-room', {
                 room_id: roomId,
                 appointment_id,
-                patient_id: appt.patient_id,
-                doctor_id: appt.doctor_id,
+                patient_user_id: appt.patient_user_id,
+                doctor_user_id: appt.doctor_user_id,
                 doctor_name: `Dr. ${appt.doctor_name}`,
                 patient_name: appt.patient_name,
                 doctor_token: doctorToken,

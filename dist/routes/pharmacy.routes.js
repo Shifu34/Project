@@ -46,5 +46,12 @@ router.get('/transactions', pharmCtrl.getTransactions);
 router.post('/inventory', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('name').notEmpty(), validate_middleware_1.validate, pharmCtrl.addInventory);
 router.post('/inventory/:id/stock-in', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('quantity').isInt({ min: 1 }), validate_middleware_1.validate, pharmCtrl.restockInventory);
 router.post('/dispense', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('prescription_item_id').isInt(), (0, express_validator_1.body)('inventory_item_id').isInt(), (0, express_validator_1.body)('quantity_dispensed').isInt({ min: 1 }), validate_middleware_1.validate, pharmCtrl.dispenseMedication);
+// ---------------------------------------------------------------------------
+// Inventory orders (patient purchases)
+// ---------------------------------------------------------------------------
+router.get('/orders', pharmCtrl.getInventoryOrders);
+router.get('/revenue', pharmCtrl.getInventoryRevenue);
+router.post('/orders', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_user_id').isInt().withMessage('patient_user_id is required'), (0, express_validator_1.body)('inventory_item_id').isInt().withMessage('inventory_item_id is required'), (0, express_validator_1.body)('quantity').isInt({ min: 1 }).withMessage('quantity must be a positive integer'), (0, express_validator_1.body)('unit_price').isFloat({ min: 0 }).withMessage('unit_price is required'), validate_middleware_1.validate, pharmCtrl.createInventoryOrder);
+router.patch('/orders/:id', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('status').optional().isIn(['pending', 'completed', 'cancelled']), validate_middleware_1.validate, pharmCtrl.updateInventoryOrder);
 exports.default = router;
 //# sourceMappingURL=pharmacy.routes.js.map

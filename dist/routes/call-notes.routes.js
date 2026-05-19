@@ -10,7 +10,7 @@ const NOTE_TYPES = ['realtime', 'interim', 'final'];
 // POST /calls/notes — save AI-generated notes (doctor-only write + read)
 router.post('/notes', auth_middleware_1.authenticate, [
     (0, express_validator_1.body)('appointment_id').isInt({ min: 1 }),
-    (0, express_validator_1.body)('patient_id').isInt({ min: 1 }),
+    (0, express_validator_1.body)('patient_user_id').isInt({ min: 1 }),
     (0, express_validator_1.body)('note_type').optional().isIn(NOTE_TYPES),
 ], validate_middleware_1.validate, call_notes_controller_1.createCallNote);
 // GET /calls/notes — list notes (doctor/admin only)

@@ -51,7 +51,7 @@ router.post('/rooms/:room_id/beds', (0, auth_middleware_1.authorize)('admin'), (
 // Admissions
 router.get('/admissions', wardCtrl.getAdmissions);
 router.get('/admissions/:id', wardCtrl.getAdmissionById);
-router.post('/admissions', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('bed_id').isInt(), (0, express_validator_1.body)('ward_id').isInt(), validate_middleware_1.validate, wardCtrl.createAdmission);
+router.post('/admissions', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_user_id').isInt(), (0, express_validator_1.body)('doctor_user_id').isInt(), (0, express_validator_1.body)('bed_id').isInt(), (0, express_validator_1.body)('ward_id').isInt(), validate_middleware_1.validate, wardCtrl.createAdmission);
 router.post('/admissions/:id/discharge', (0, auth_middleware_1.authorize)('admin', 'doctor'), validate_middleware_1.validate, wardCtrl.dischargePatient);
 exports.default = router;
 //# sourceMappingURL=ward.routes.js.map

@@ -43,7 +43,7 @@ router.use(auth_middleware_1.authenticate);
 router.get('/locations', deptCtrl.getDepartmentLocations);
 router.get('/', deptCtrl.getDepartments);
 router.get('/:id', deptCtrl.getDepartmentById);
-router.post('/', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('name').notEmpty().trim(), validate_middleware_1.validate, deptCtrl.createDepartment);
-router.put('/:id', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('name').notEmpty().trim(), validate_middleware_1.validate, deptCtrl.updateDepartment);
+router.post('/', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('name').notEmpty().trim(), (0, express_validator_1.body)('branch_id').isInt().withMessage('branch_id is required'), (0, express_validator_1.body)('head_user_id').optional().isInt(), validate_middleware_1.validate, deptCtrl.createDepartment);
+router.put('/:id', (0, auth_middleware_1.authorize)('admin'), (0, express_validator_1.body)('name').notEmpty().trim(), (0, express_validator_1.body)('branch_id').optional().isInt(), (0, express_validator_1.body)('head_user_id').optional().isInt(), validate_middleware_1.validate, deptCtrl.updateDepartment);
 exports.default = router;
 //# sourceMappingURL=department.routes.js.map

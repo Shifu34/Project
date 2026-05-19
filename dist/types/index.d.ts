@@ -3,7 +3,6 @@ export interface AuthPayload {
     roleId: number;
     roleName: string;
     email: string;
-    organizationId?: number | null;
 }
 export interface PaginationQuery {
     page?: string;
@@ -78,7 +77,6 @@ export interface UserProfile {
 }
 export interface Patient {
     id: number;
-    organization_id?: number;
     user_id?: number;
     patient_code: string;
     first_name: string;
@@ -110,7 +108,7 @@ export interface InsuranceProvider {
 }
 export interface UserInsurance {
     id: number;
-    patient_id: number;
+    patient_user_id: number;
     insurance_provider_id: number;
     policy_number: string;
     group_number?: string;
@@ -123,10 +121,10 @@ export interface UserInsurance {
 }
 export interface Department {
     id: number;
-    organization_id?: number;
+    branch_id?: number;
     name: string;
     description?: string;
-    head_doctor_id?: number;
+    head_user_id?: number;
     phone?: string;
     location?: string;
     is_active: boolean;
@@ -134,8 +132,11 @@ export interface Department {
     updated_at: Date;
 }
 export interface Doctor {
-    id: number;
+    id?: number;
+    employee_id?: number;
     user_id: number;
+    branch_id?: number | null;
+    account_status?: 'unclaimed' | 'claim_pending' | 'active' | 'rejected' | 'suspended' | 'inactive';
     department_id?: number;
     specialization?: string;
     license_number?: string;
@@ -149,7 +150,8 @@ export interface Doctor {
 }
 export interface DoctorSchedule {
     id: number;
-    doctor_id: number;
+    doctor_user_id: number;
+    doctor_branch_id: number;
     day_of_week: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
     start_time: string;
     end_time: string;
@@ -160,14 +162,14 @@ export interface DoctorSchedule {
 }
 export interface Appointment {
     id: number;
-    patient_id: number;
-    doctor_id: number;
-    department_id?: number;
+    patient_user_id: number;
+    doctor_user_id: number;
+    doctor_branch_id: number;
     appointment_date: Date;
     appointment_time: string;
     duration_minutes: number;
     appointment_type?: 'consultation' | 'follow_up' | 'emergency' | 'procedure' | 'checkup';
-    status: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+    status: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show' | 'payment_timeout';
     reason?: string;
     notes?: string;
     booked_by?: number;
@@ -179,7 +181,7 @@ export interface Appointment {
 export interface Payment {
     id: number;
     appointment_id?: number;
-    patient_id: number;
+    patient_user_id: number;
     amount: number;
     payment_method?: string;
     transaction_reference?: string;
@@ -204,8 +206,8 @@ export interface PaymentRefund {
 export interface Encounter {
     id: number;
     appointment_id?: number;
-    patient_id: number;
-    doctor_id: number;
+    patient_user_id: number;
+    doctor_user_id: number;
     encounter_date: Date;
     encounter_type?: 'outpatient' | 'inpatient' | 'emergency' | 'telemedicine';
     chief_complaint?: string;
@@ -221,8 +223,8 @@ export interface Encounter {
 export interface Diagnosis {
     id: number;
     encounter_id: number;
-    patient_id: number;
-    doctor_id: number;
+    patient_user_id: number;
+    doctor_user_id: number;
     icd_code?: string;
     diagnosis_text: string;
     diagnosis_type?: 'primary' | 'secondary' | 'differential';
@@ -244,7 +246,7 @@ export interface ClinicalNote {
 export interface Vitals {
     id: number;
     encounter_id: number;
-    patient_id: number;
+    patient_user_id: number;
     recorded_by?: number;
     temperature?: number;
     blood_pressure_systolic?: number;
@@ -263,8 +265,8 @@ export interface Vitals {
 export interface Prescription {
     id: number;
     encounter_id: number;
-    patient_id: number;
-    doctor_id: number;
+    patient_user_id: number;
+    doctor_user_id: number;
     prescription_date: Date;
     valid_until?: Date;
     status: 'active' | 'dispensed' | 'partially_dispensed' | 'expired' | 'cancelled';
@@ -274,7 +276,7 @@ export interface Prescription {
 }
 export interface InventoryItem {
     id: number;
-    organization_id?: number;
+    branch_id?: number;
     name: string;
     generic_name?: string;
     category?: string;
@@ -332,8 +334,9 @@ export interface LabTestCatalog {
 export interface LabOrder {
     id: number;
     encounter_id: number;
-    patient_id: number;
-    doctor_id: number;
+    patient_user_id: number;
+    doctor_user_id: number;
+    doctor_branch_id: number;
     ordered_by: number;
     order_date: Date;
     priority: 'routine' | 'urgent' | 'stat';
@@ -372,8 +375,9 @@ export interface RadiologyTestCatalog {
 export interface RadiologyOrder {
     id: number;
     encounter_id: number;
-    patient_id: number;
-    doctor_id: number;
+    patient_user_id: number;
+    doctor_user_id: number;
+    branch_id: number;
     ordered_by: number;
     order_date: Date;
     priority: 'routine' | 'urgent' | 'stat';

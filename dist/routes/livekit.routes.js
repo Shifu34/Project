@@ -38,6 +38,6 @@ const livekitCtrl = __importStar(require("../controllers/livekit.controller"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
-router.post('/token', (0, auth_middleware_1.authorize)('patient', 'doctor', 'admin'), livekitCtrl.generateToken);
+router.post('/token', (0, auth_middleware_1.authorize)('patient', 'doctor', 'admin', 'lab_staff'), livekitCtrl.generateToken);
 exports.default = router;
 //# sourceMappingURL=livekit.routes.js.map

@@ -4,19 +4,19 @@ exports.getCallNotes = exports.getCallNoteById = exports.createCallNote = void 0
 const database_1 = require("../config/database");
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /calls/notes
-// Body: { appointment_id, room_id?, patient_id, doctor_id?, note_type?,
+// Body: { appointment_id, room_id?, patient_user_id, doctor_user_id?, note_type?,
 //         content?, structured_data?, ai_model?, language? }
 // Visibility: doctor-only (enforced at route level)
 // ─────────────────────────────────────────────────────────────────────────────
 const createCallNote = async (req, res, next) => {
     try {
-        const { appointment_id, room_id = null, patient_id, doctor_id = null, note_type = 'realtime', content = null, structured_data = null, ai_model = null, language = 'en', } = req.body;
+        const { appointment_id, room_id = null, patient_user_id, doctor_user_id = null, note_type = 'realtime', content = null, structured_data = null, ai_model = null, language = 'en', } = req.body;
         const result = await (0, database_1.query)(`INSERT INTO call_ai_notes
-         (appointment_id, room_id, patient_id, doctor_id, note_type,
+         (appointment_id, room_id, patient_user_id, doctor_user_id, note_type,
           content, structured_data, ai_model, language, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`, [
-            appointment_id, room_id, patient_id, doctor_id, note_type,
+            appointment_id, room_id, patient_user_id, doctor_user_id, note_type,
             content,
             structured_data ? JSON.stringify(structured_data) : null,
             ai_model, language, req.user?.userId ?? null,
@@ -36,9 +36,9 @@ const getCallNoteById = async (req, res, next) => {
         const result = await (0, database_1.query)(`SELECT n.*,
               p.first_name || ' ' || p.last_name AS patient_name,
               d.first_name || ' ' || d.last_name AS doctor_name
-       FROM call_ai_notes n
-       LEFT JOIN patients p ON p.id = n.patient_id
-       LEFT JOIN doctors  d ON d.id = n.doctor_id
+      FROM call_ai_notes n
+            LEFT JOIN patients p ON p.user_id = n.patient_user_id
+            LEFT JOIN doctors  d ON d.user_id = n.doctor_user_id
        WHERE n.id = $1`, [req.params.id]);
         if (result.rows.length === 0) {
             res.status(404).json({ success: false, message: 'Call note not found' });
@@ -81,8 +81,8 @@ const getCallNotes = async (req, res, next) => {
                 p.first_name || ' ' || p.last_name AS patient_name,
                 d.first_name || ' ' || d.last_name AS doctor_name
          FROM call_ai_notes n
-         LEFT JOIN patients p ON p.id = n.patient_id
-         LEFT JOIN doctors  d ON d.id = n.doctor_id
+         LEFT JOIN patients p ON p.user_id = n.patient_user_id
+         LEFT JOIN doctors  d ON d.user_id = n.doctor_user_id
          ${where}
          ORDER BY n.created_at DESC
          LIMIT $${idx} OFFSET $${idx + 1}`, [...values, limit, offset]),

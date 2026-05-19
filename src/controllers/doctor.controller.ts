@@ -112,18 +112,6 @@ export const getDoctorById = async (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
-    if (!doctorUserId) {
-      res.status(404).json({ success: false, message: 'Doctor not found' });
-      return;
-    }
-
-    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
-    if (!doctorUserId) {
-      res.status(404).json({ success: false, message: 'Doctor not found' });
-      return;
-    }
-
     const result = await query(
       `SELECT d.*, d.employee_id AS id,
               COALESCE(u.first_name, d.first_name) AS first_name,
@@ -277,6 +265,12 @@ export const getDoctorAppointments = async (req: Request, res: Response, next: N
     const branchId = getBranchIdFromRequest(req);
     if (!branchId) {
       res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
+    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
       return;
     }
 
@@ -631,6 +625,12 @@ export const getDoctorScheduleByDate = async (req: Request, res: Response, next:
     const branchId = getBranchIdFromRequest(req);
     if (!branchId) {
       res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
+    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
       return;
     }
 
@@ -1002,6 +1002,12 @@ export const getDoctorBookedAppointments = async (req: Request, res: Response, n
     const branchId = getBranchIdFromRequest(req);
     if (!branchId) {
       res.status(400).json({ success: false, message: 'branch_id is required' });
+      return;
+    }
+
+    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
+    if (!doctorUserId) {
+      res.status(404).json({ success: false, message: 'Doctor not found' });
       return;
     }
 

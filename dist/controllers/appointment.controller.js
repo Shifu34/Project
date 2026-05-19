@@ -5,7 +5,6 @@ const database_1 = require("../config/database");
 // GET /appointments
 const getAppointments = async (req, res, next) => {
     try {
-        const authReq = req;
         const page = Math.max(1, parseInt(req.query.page || '1', 10));
         const size = Math.min(100, parseInt((req.query.size || req.query.limit) || '20', 10));
         const date = req.query.date;
@@ -17,14 +16,6 @@ const getAppointments = async (req, res, next) => {
         const countConditions = [];
         let mainIdx = 3;
         let countIdx = 1;
-        // Org-scoping: org admins only see their own org's appointments
-        const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
-        if (orgId) {
-            mainConditions.push(`a.organization_id = $${mainIdx++}`);
-            countConditions.push(`a.organization_id = $${countIdx++}`);
-            mainParams.push(orgId);
-            countParams.push(orgId);
-        }
         if (date) {
             mainConditions.push(`a.appointment_date = $${mainIdx++}`);
             countConditions.push(`a.appointment_date = $${countIdx++}`);
@@ -37,6 +28,11 @@ const getAppointments = async (req, res, next) => {
             mainParams.push(status);
             countParams.push(status);
         }
+        else {
+            // Always hide payment_timeout rows from normal listing
+            mainConditions.push(`a.status != 'payment_timeout'`);
+            countConditions.push(`a.status != 'payment_timeout'`);
+        }
         const mainWhere = mainConditions.length ? `WHERE ${mainConditions.join(' AND ')}` : '';
         const countWhere = countConditions.length ? `WHERE ${countConditions.join(' AND ')}` : '';
         const [dataRes, countRes] = await Promise.all([
@@ -45,10 +41,10 @@ const getAppointments = async (req, res, next) => {
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 dept.name AS department
          FROM appointments a
-         JOIN patients p ON p.id = a.patient_id
-         JOIN doctors doc ON doc.id = a.doctor_id
+         JOIN patients p ON p.user_id = a.patient_user_id
+         JOIN doctors doc ON doc.user_id = a.doctor_user_id AND doc.branch_id = a.doctor_branch_id
          JOIN users u ON u.id = doc.user_id
-         LEFT JOIN departments dept ON dept.id = a.department_id
+         LEFT JOIN departments dept ON dept.id = doc.department_id
          ${mainWhere}
          ORDER BY a.appointment_date DESC, a.appointment_time DESC
          LIMIT $1 OFFSET $2`, mainParams),
@@ -70,10 +66,10 @@ const getAppointmentById = async (req, res, next) => {
               CONCAT(u.first_name,' ',u.last_name) AS doctor_name, doc.specialization,
               dept.name AS department
        FROM appointments a
-       JOIN patients p ON p.id = a.patient_id
-       JOIN doctors doc ON doc.id = a.doctor_id
+      JOIN patients p ON p.user_id = a.patient_user_id
+      JOIN doctors doc ON doc.user_id = a.doctor_user_id AND doc.branch_id = a.doctor_branch_id
        JOIN users u ON u.id = doc.user_id
-       LEFT JOIN departments dept ON dept.id = a.department_id
+       LEFT JOIN departments dept ON dept.id = doc.department_id
        WHERE a.id = $1`, [req.params.id]);
         if (result.rows.length === 0) {
             res.status(404).json({ success: false, message: 'Appointment not found' });
@@ -89,7 +85,7 @@ exports.getAppointmentById = getAppointmentById;
 // POST /appointments
 const createAppointment = async (req, res, next) => {
     try {
-        const { patient_id, doctor_id, department_id, appointment_date, appointment_time, duration_minutes, appointment_type, nature_of_visit_id, nature_of_visit, reason, notes, } = req.body;
+        const { patient_user_id, doctor_user_id, doctor_branch_id, appointment_date, appointment_time, duration_minutes, appointment_type, nature_of_visit_id, nature_of_visit, reason, notes, } = req.body;
         const bookedBy = req.user?.userId;
         // Resolve nature_of_visit_id: accept either the ID directly or a name string
         let resolvedNatureId = nature_of_visit_id || null;
@@ -101,16 +97,17 @@ const createAppointment = async (req, res, next) => {
         }
         // Conflict check
         const conflict = await (0, database_1.query)(`SELECT id FROM appointments
-       WHERE doctor_id = $1 AND appointment_date = $2 AND appointment_time = $3
-         AND status NOT IN ('cancelled','no_show')`, [doctor_id, appointment_date, appointment_time]);
+       WHERE doctor_user_id = $1 AND doctor_branch_id = $2
+         AND appointment_date = $3 AND appointment_time = $4
+         AND status NOT IN ('cancelled','no_show')`, [doctor_user_id, doctor_branch_id, appointment_date, appointment_time]);
         if (conflict.rows.length > 0) {
             res.status(409).json({ success: false, message: 'Doctor already has an appointment at this time' });
             return;
         }
         const result = await (0, database_1.query)(`INSERT INTO appointments
-         (patient_id, doctor_id, department_id, appointment_date, appointment_time,
-          duration_minutes, appointment_type, nature_of_visit_id, reason, notes, booked_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [patient_id, doctor_id, department_id, appointment_date, appointment_time,
+        (patient_user_id, doctor_user_id, doctor_branch_id, appointment_date, appointment_time,
+         duration_minutes, appointment_type, nature_of_visit_id, reason, notes, booked_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [patient_user_id, doctor_user_id, doctor_branch_id, appointment_date, appointment_time,
             duration_minutes || 30, appointment_type || 'Online Consultation', resolvedNatureId, reason, notes, bookedBy]);
         res.status(201).json({ success: true, data: result.rows[0] });
     }
@@ -170,37 +167,39 @@ const getMyAppointments = async (req, res, next) => {
         const date = req.query.date;
         const offset = (page - 1) * size;
         let ownerCondition;
-        let ownerParam;
+        let ownerParams;
         if (roleName === 'patient') {
             const patientRes = await (0, database_1.query)(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
             if (patientRes.rows.length === 0) {
                 res.status(404).json({ success: false, message: 'Patient profile not found' });
                 return;
             }
-            ownerCondition = 'a.patient_id = $3';
-            ownerParam = patientRes.rows[0].id;
+            ownerCondition = 'a.patient_user_id = $3';
+            ownerParams = [userId];
         }
         else if (roleName === 'doctor') {
-            const doctorRes = await (0, database_1.query)(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [userId]);
+            const doctorRes = await (0, database_1.query)(`SELECT branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [userId]);
             if (doctorRes.rows.length === 0) {
                 res.status(404).json({ success: false, message: 'Doctor profile not found' });
                 return;
             }
-            ownerCondition = 'a.doctor_id = $3';
-            ownerParam = doctorRes.rows[0].id;
+            ownerCondition = 'a.doctor_user_id = $3 AND a.doctor_branch_id = $4';
+            ownerParams = [userId, doctorRes.rows[0].branch_id];
         }
         else {
             res.status(403).json({ success: false, message: 'Only patients and doctors can use this endpoint' });
             return;
         }
-        const dataParams = [size, offset, ownerParam];
-        const countParams = [ownerParam];
-        const ownerColClause = ownerCondition; // e.g. 'a.patient_id = $3'
-        const ownerColClauseCount = ownerCondition.replace('$3', '$1');
+        const dataParams = [size, offset, ...ownerParams];
+        const countParams = [...ownerParams];
+        const ownerColClause = ownerCondition; // e.g. 'a.patient_user_id = $3'
+        const ownerColClauseCount = ownerCondition
+            .replace('$3', '$1')
+            .replace('$4', '$2');
         const dataConditions = [ownerColClause];
         const countConditions = [ownerColClauseCount];
-        let dataIdx = 4;
-        let countIdx = 2;
+        let dataIdx = ownerParams.length + 3;
+        let countIdx = ownerParams.length + 1;
         if (status) {
             dataConditions.push(`a.status = $${dataIdx++}`);
             countConditions.push(`a.status = $${countIdx++}`);
@@ -220,16 +219,17 @@ const getMyAppointments = async (req, res, next) => {
            a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
            a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason, a.notes,
            a.cancellation_reason, a.created_at,
-           p.id AS patient_id, CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code, p.phone AS patient_phone,
+           p.user_id AS patient_user_id, CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code, p.phone AS patient_phone,
            p.gender AS patient_gender, DATE_PART('year', AGE(p.date_of_birth))::INT AS patient_age,
-           doc.id AS doctor_id,
+           doc.user_id AS doctor_user_id,
+           a.doctor_branch_id,
            CONCAT(doc.first_name,' ',doc.last_name) AS doctor_name,
            doc.specialization, doc.consultation_fee,
            dept.name AS department
          FROM appointments a
-         JOIN patients p   ON p.id   = a.patient_id
-         JOIN doctors doc  ON doc.id = a.doctor_id
-         LEFT JOIN departments dept ON dept.id = a.department_id
+         JOIN patients p   ON p.user_id   = a.patient_user_id
+         JOIN doctors doc  ON doc.user_id = a.doctor_user_id AND doc.branch_id = a.doctor_branch_id
+         LEFT JOIN departments dept ON dept.id = doc.department_id
          LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
          ${where}
          ORDER BY a.appointment_date DESC, a.appointment_time DESC
@@ -271,24 +271,24 @@ const getUpcomingAppointment = async (req, res, next) => {
             currentTime = now.toISOString().split('T')[1].slice(0, 8);
         }
         let ownerCondition;
-        let ownerParam;
+        let ownerParams;
         if (roleName === 'patient') {
             const patientRes = await (0, database_1.query)(`SELECT id FROM patients WHERE user_id = $1 LIMIT 1`, [userId]);
             if (patientRes.rows.length === 0) {
                 res.status(404).json({ success: false, message: 'Patient profile not found' });
                 return;
             }
-            ownerCondition = 'a.patient_id = $1';
-            ownerParam = patientRes.rows[0].id;
+            ownerCondition = 'a.patient_user_id = $1';
+            ownerParams = [userId];
         }
         else if (roleName === 'doctor') {
-            const doctorRes = await (0, database_1.query)(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [userId]);
+            const doctorRes = await (0, database_1.query)(`SELECT branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [userId]);
             if (doctorRes.rows.length === 0) {
                 res.status(404).json({ success: false, message: 'Doctor profile not found' });
                 return;
             }
-            ownerCondition = 'a.doctor_id = $1';
-            ownerParam = doctorRes.rows[0].id;
+            ownerCondition = 'a.doctor_user_id = $1 AND a.doctor_branch_id = $2';
+            ownerParams = [userId, doctorRes.rows[0].branch_id];
         }
         else {
             res.status(403).json({ success: false, message: 'Only patients and doctors can use this endpoint' });
@@ -298,16 +298,17 @@ const getUpcomingAppointment = async (req, res, next) => {
          a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
          a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason, a.notes,
          a.created_at,
-         p.id AS patient_id, CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
+         p.user_id AS patient_user_id, CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
          p.gender AS patient_gender, DATE_PART('year', AGE(p.date_of_birth))::INT AS patient_age,
-         doc.id AS doctor_id,
+         doc.user_id AS doctor_user_id,
+         a.doctor_branch_id,
          CONCAT(doc.first_name,' ',doc.last_name) AS doctor_name,
          doc.specialization, doc.consultation_fee,
          dept.name AS department
        FROM appointments a
-       JOIN patients p   ON p.id   = a.patient_id
-       JOIN doctors doc  ON doc.id = a.doctor_id
-       LEFT JOIN departments dept ON dept.id = a.department_id
+       JOIN patients p   ON p.user_id   = a.patient_user_id
+       JOIN doctors doc  ON doc.user_id = a.doctor_user_id AND doc.branch_id = a.doctor_branch_id
+       LEFT JOIN departments dept ON dept.id = doc.department_id
        LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
        WHERE ${ownerCondition}
          AND (a.appointment_date > $3::date
@@ -315,7 +316,7 @@ const getUpcomingAppointment = async (req, res, next) => {
          AND a.appointment_date <= $3::date + ($2 || ' days')::INTERVAL
          AND a.status NOT IN ('cancelled', 'no_show', 'completed', 'pending', 'in_progress')
        ORDER BY a.appointment_date ASC, a.appointment_time ASC
-       LIMIT 1`, [ownerParam, days, currentDate, currentTime]);
+       LIMIT 1`, [...ownerParams, days, currentDate, currentTime]);
         res.json({ success: true, data: result.rows[0] || null });
     }
     catch (err) {
@@ -329,8 +330,12 @@ const patchAppointment = async (req, res, next) => {
         const allowed = [
             'appointment_date', 'appointment_time', 'duration_minutes',
             'appointment_type', 'nature_of_visit_id', 'reason', 'notes',
-            'status', 'patient_id', 'doctor_id', 'department_id',
+            'status', 'patient_user_id', 'doctor_user_id', 'doctor_branch_id',
         ];
+        if ((req.body.doctor_user_id !== undefined) !== (req.body.doctor_branch_id !== undefined)) {
+            res.status(400).json({ success: false, message: 'doctor_user_id and doctor_branch_id must be provided together' });
+            return;
+        }
         const sets = [];
         const params = [];
         let idx = 1;
@@ -437,10 +442,12 @@ const getAppointmentEncounter = async (req, res, next) => {
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.patient_code
        FROM encounters e
-       JOIN doctors d ON d.id = e.doctor_id
+      JOIN doctors d ON d.user_id = e.doctor_user_id
        LEFT JOIN users u ON u.id = d.user_id
-       JOIN patients p ON p.id = e.patient_id
-       WHERE e.appointment_id = $1`, [appointmentId]);
+      JOIN patients p ON p.user_id = e.patient_user_id
+       WHERE e.appointment_id = $1
+       ORDER BY e.encounter_date DESC
+       LIMIT 1`, [appointmentId]);
         if (encRes.rows.length === 0) {
             res.status(404).json({ success: false, message: 'No encounter found for this appointment' });
             return;
@@ -456,7 +463,7 @@ const getAppointmentEncounter = async (req, res, next) => {
                 COALESCE(d.first_name || ' ' || d.last_name,
                          u.first_name || ' ' || u.last_name) AS doctor_name
          FROM diagnoses diag
-         JOIN doctors d ON d.id = diag.doctor_id
+         JOIN doctors d ON d.user_id = diag.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          WHERE diag.encounter_id = $1 ORDER BY diag.diagnosed_date DESC`, [encounterId]),
             (0, database_1.query)(`SELECT p.*,
@@ -473,7 +480,7 @@ const getAppointmentEncounter = async (req, res, next) => {
                   ) ORDER BY pi.id
                 ) AS items
          FROM prescriptions p
-         JOIN doctors d ON d.id = p.doctor_id
+         JOIN doctors d ON d.user_id = p.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
          WHERE p.encounter_id = $1
@@ -555,22 +562,22 @@ const saveAppointmentEncounter = async (req, res, next) => {
         await client.query('BEGIN');
         const appointmentId = req.params.id;
         const userId = req.user?.userId;
-        // Resolve appointment → patient_id, doctor_id
-        const apptRes = await client.query(`SELECT patient_id, doctor_id FROM appointments WHERE id = $1`, [appointmentId]);
+        // Resolve appointment → patient_user_id, doctor_user_id, doctor_branch_id
+        const apptRes = await client.query(`SELECT patient_user_id, doctor_user_id, doctor_branch_id FROM appointments WHERE id = $1`, [appointmentId]);
         if (apptRes.rows.length === 0) {
             res.status(404).json({ success: false, message: 'Appointment not found' });
             await client.query('ROLLBACK');
             return;
         }
-        const { patient_id, doctor_id } = apptRes.rows[0];
+        const { patient_user_id, doctor_user_id, doctor_branch_id } = apptRes.rows[0];
         const { encounter: enc, vitals, diagnoses, prescriptions, lab_orders, radiology_orders, } = req.body;
         // 1. Encounter
         const encRow = await client.query(`INSERT INTO encounters
-         (appointment_id, patient_id, doctor_id, encounter_type,
+        (appointment_id, patient_user_id, doctor_user_id, encounter_type,
           chief_complaint, history_of_present_illness, physical_examination,
           assessment, plan, follow_up_date, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'in_progress')
-       RETURNING *`, [appointmentId, patient_id, doctor_id,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'in_progress')
+       RETURNING *`, [appointmentId, patient_user_id, doctor_user_id,
             enc?.encounter_type ?? 'outpatient',
             enc?.chief_complaint ?? null,
             enc?.history_of_present_illness ?? null,
@@ -584,11 +591,11 @@ const saveAppointmentEncounter = async (req, res, next) => {
         // 2. Vitals
         if (vitals) {
             await client.query(`INSERT INTO vitals
-           (encounter_id, patient_id, recorded_by,
+            (encounter_id, patient_user_id, recorded_by,
             temperature, blood_pressure_systolic, blood_pressure_diastolic,
             heart_rate, respiratory_rate, oxygen_saturation,
             weight, height, bmi, blood_glucose, pain_scale, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [encounterId, patient_id, userId,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [encounterId, patient_user_id, userId,
                 vitals.temperature ?? null, vitals.blood_pressure_systolic ?? null,
                 vitals.blood_pressure_diastolic ?? null, vitals.heart_rate ?? null,
                 vitals.respiratory_rate ?? null, vitals.oxygen_saturation ?? null,
@@ -600,9 +607,9 @@ const saveAppointmentEncounter = async (req, res, next) => {
         if (Array.isArray(diagnoses)) {
             for (const d of diagnoses) {
                 await client.query(`INSERT INTO diagnoses
-             (encounter_id, patient_id, doctor_id, icd_code, diagnosis_text,
+             (encounter_id, patient_user_id, doctor_user_id, icd_code, diagnosis_text,
               diagnosis_type, status, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [encounterId, patient_id, doctor_id,
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [encounterId, patient_user_id, doctor_user_id,
                     d.icd_code ?? null, d.diagnosis_text,
                     d.diagnosis_type ?? 'primary', d.status ?? 'active',
                     d.notes ?? null]);
@@ -612,8 +619,8 @@ const saveAppointmentEncounter = async (req, res, next) => {
         if (Array.isArray(prescriptions)) {
             for (const pres of prescriptions) {
                 const presRow = await client.query(`INSERT INTO prescriptions
-             (encounter_id, patient_id, doctor_id, valid_until, notes)
-           VALUES ($1,$2,$3,$4,$5) RETURNING id`, [encounterId, patient_id, doctor_id,
+             (encounter_id, patient_user_id, doctor_user_id, valid_until, notes)
+            VALUES ($1,$2,$3,$4,$5) RETURNING id`, [encounterId, patient_user_id, doctor_user_id,
                     pres.valid_until ?? null, pres.notes ?? null]);
                 const presId = presRow.rows[0].id;
                 if (Array.isArray(pres.items)) {
@@ -632,8 +639,8 @@ const saveAppointmentEncounter = async (req, res, next) => {
         if (Array.isArray(lab_orders)) {
             for (const lo of lab_orders) {
                 const loRow = await client.query(`INSERT INTO lab_orders
-             (encounter_id, patient_id, doctor_id, ordered_by, priority, clinical_notes)
-           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [encounterId, patient_id, doctor_id, userId,
+             (encounter_id, patient_user_id, doctor_user_id, doctor_branch_id, ordered_by, priority, clinical_notes)
+            VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [encounterId, patient_user_id, doctor_user_id, doctor_branch_id, userId,
                     lo.priority ?? 'routine', lo.clinical_notes ?? null]);
                 const loId = loRow.rows[0].id;
                 if (Array.isArray(lo.test_ids)) {
@@ -647,8 +654,8 @@ const saveAppointmentEncounter = async (req, res, next) => {
         if (Array.isArray(radiology_orders)) {
             for (const ro of radiology_orders) {
                 const roRow = await client.query(`INSERT INTO radiology_orders
-             (encounter_id, patient_id, doctor_id, ordered_by, priority, clinical_notes)
-           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [encounterId, patient_id, doctor_id, userId,
+             (encounter_id, patient_user_id, doctor_user_id, branch_id, ordered_by, priority, clinical_notes)
+            VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [encounterId, patient_user_id, doctor_user_id, doctor_branch_id, userId,
                     ro.priority ?? 'routine', ro.clinical_notes ?? null]);
                 const roId = roRow.rows[0].id;
                 if (Array.isArray(ro.test_ids)) {
@@ -697,13 +704,13 @@ const updateAppointmentEncounter = async (req, res, next) => {
         await client.query('BEGIN');
         const appointmentId = req.params.id;
         const userId = req.user?.userId;
-        const encRes = await client.query(`SELECT id, patient_id, doctor_id FROM encounters WHERE appointment_id = $1`, [appointmentId]);
+        const encRes = await client.query(`SELECT id, patient_user_id, doctor_user_id FROM encounters WHERE appointment_id = $1`, [appointmentId]);
         if (encRes.rows.length === 0) {
             res.status(404).json({ success: false, message: 'No encounter found for this appointment' });
             await client.query('ROLLBACK');
             return;
         }
-        const { id: encounterId, patient_id, doctor_id } = encRes.rows[0];
+        const { id: encounterId, patient_user_id, doctor_user_id } = encRes.rows[0];
         const { encounter, vitals, diagnoses, prescriptions, prescription_items, lab_order_items, radiology_order_items, } = req.body;
         // Update encounter fields
         if (encounter) {
@@ -748,11 +755,11 @@ const updateAppointmentEncounter = async (req, res, next) => {
             }
             else {
                 await client.query(`INSERT INTO vitals
-             (encounter_id, patient_id, recorded_by,
+             (encounter_id, patient_user_id, recorded_by,
               temperature, blood_pressure_systolic, blood_pressure_diastolic,
               heart_rate, respiratory_rate, oxygen_saturation,
               weight, height, bmi, blood_glucose, pain_scale, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [encounterId, patient_id, userId,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [encounterId, patient_user_id, userId,
                     vitals.temperature ?? null, vitals.blood_pressure_systolic ?? null,
                     vitals.blood_pressure_diastolic ?? null, vitals.heart_rate ?? null,
                     vitals.respiratory_rate ?? null, vitals.oxygen_saturation ?? null,
@@ -767,9 +774,9 @@ const updateAppointmentEncounter = async (req, res, next) => {
                 if (!d.id) {
                     // New diagnosis — insert it
                     await client.query(`INSERT INTO diagnoses
-               (encounter_id, patient_id, doctor_id, icd_code, diagnosis_text,
-                diagnosis_type, status, notes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [encounterId, patient_id, doctor_id,
+                (encounter_id, patient_user_id, doctor_user_id, icd_code, diagnosis_text,
+                 diagnosis_type, status, notes)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [encounterId, patient_user_id, doctor_user_id,
                         d.icd_code ?? null, d.diagnosis_text,
                         d.diagnosis_type ?? 'primary', d.status ?? 'active',
                         d.notes ?? null]);
@@ -895,7 +902,6 @@ exports.updateAppointmentEncounter = updateAppointmentEncounter;
 // GET /appointments/range?start=YYYY-MM-DD&end=YYYY-MM-DD[&status=confirmed]
 const getAppointmentsByDateRange = async (req, res, next) => {
     try {
-        const authReq = req;
         const { start, end, status } = req.query;
         if (!start || !end) {
             res.status(400).json({ success: false, message: 'start and end query params are required (YYYY-MM-DD)' });
@@ -910,15 +916,9 @@ const getAppointmentsByDateRange = async (req, res, next) => {
             res.status(400).json({ success: false, message: 'start date must not be after end date' });
             return;
         }
-        // Org-scoping: org admins only see their own org's appointments
-        const orgId = authReq.user?.roleName !== 'super_admin' ? (authReq.user?.organizationId ?? null) : null;
         const params = [start, end];
         let idx = 3;
         const extraFilters = [];
-        if (orgId) {
-            extraFilters.push(`a.organization_id = $${idx++}`);
-            params.push(orgId);
-        }
         if (status) {
             extraFilters.push(`a.status = $${idx++}`);
             params.push(status);
@@ -929,10 +929,10 @@ const getAppointmentsByDateRange = async (req, res, next) => {
               CONCAT(u.first_name,' ',u.last_name) AS doctor_name, doc.specialization,
               dept.name AS department
        FROM   appointments a
-       JOIN   patients p    ON p.id   = a.patient_id
-       JOIN   doctors doc   ON doc.id = a.doctor_id
+      JOIN   patients p    ON p.user_id   = a.patient_user_id
+          JOIN   doctors doc   ON doc.user_id = a.doctor_user_id AND doc.branch_id = a.doctor_branch_id
        JOIN   users u       ON u.id   = doc.user_id
-       LEFT JOIN departments dept ON dept.id = a.department_id
+      LEFT JOIN departments dept ON dept.id = doc.department_id
        WHERE  a.appointment_date BETWEEN $1 AND $2
        ${extraWhere}
        ORDER BY a.appointment_date ASC, a.appointment_time ASC`, params);

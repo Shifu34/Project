@@ -69,12 +69,10 @@ const login = async (req, res, next) => {
         const { identifier, password } = req.body;
         const isEmail = identifier.includes('@');
         const result = await (0, database_1.query)(`SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name,
-              u.phone, u.cnic, u.is_active, u.organization_id,
-              r.id AS role_id, r.name AS role_name, r.permissions,
-              o.name AS organization_name
+              u.phone, u.cnic, u.is_active,
+              r.id AS role_id, r.name AS role_name, r.permissions
        FROM users u
        JOIN roles r ON r.id = u.role_id
-       LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE ${isEmail ? 'u.email = $1' : 'u.cnic = $1'}`, [identifier]);
         if (result.rows.length === 0) {
             res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -112,17 +110,19 @@ const login = async (req, res, next) => {
         }
         // Fetch doctor_id if the user is a doctor
         let doctorId = null;
+        let doctorBranchId = null;
         if (user.role_name === 'doctor') {
-            const doctorRes = await (0, database_1.query)(`SELECT id FROM doctors WHERE user_id = $1 LIMIT 1`, [user.id]);
-            if (doctorRes.rows.length > 0)
+            const doctorRes = await (0, database_1.query)(`SELECT employee_id AS id, branch_id FROM doctors WHERE user_id = $1 LIMIT 1`, [user.id]);
+            if (doctorRes.rows.length > 0) {
                 doctorId = doctorRes.rows[0].id;
+                doctorBranchId = doctorRes.rows[0].branch_id;
+            }
         }
         const payload = {
             userId: user.id,
             roleId: user.role_id,
             roleName: user.role_name,
             email: user.email,
-            organizationId: user.organization_id ?? null,
         };
         const token = jsonwebtoken_1.default.sign(payload, env_1.env.jwtSecret, { expiresIn: env_1.env.jwtExpiresIn });
         const refreshToken = jsonwebtoken_1.default.sign(payload, env_1.env.jwtRefreshSecret, { expiresIn: env_1.env.jwtRefreshExpiresIn });
@@ -142,9 +142,7 @@ const login = async (req, res, next) => {
                     cnic: user.cnic,
                     gender: patientData.gender ?? null,
                     date_of_birth: patientData.date_of_birth ?? null,
-                    organization_id: user.organization_id ?? null,
-                    organization_name: user.organization_name ?? null,
-                    ...(doctorId !== null && { doctor_id: doctorId }),
+                    ...(doctorId !== null && { doctor_id: doctorId, doctor_branch_id: doctorBranchId }),
                     ...(patientData.id !== undefined && { patient_id: patientData.id }),
                 },
             },
@@ -360,7 +358,11 @@ exports.sendRegistrationOtp = sendRegistrationOtp;
 // POST /auth/register-lab-staff  (Admin only)
 const registerLabStaff = async (req, res, next) => {
     try {
-        const { name, phone, email, password, organization_id } = req.body;
+        const { name, phone, email, password, branch_id } = req.body;
+        if (!branch_id) {
+            res.status(400).json({ success: false, message: 'branch_id is required' });
+            return;
+        }
         const dup = await (0, database_1.query)(`SELECT id FROM users WHERE email = $1`, [email]);
         if (dup.rows.length > 0) {
             res.status(409).json({ success: false, message: 'Email is already registered' });
@@ -380,11 +382,11 @@ const registerLabStaff = async (req, res, next) => {
             // Split name into first/last (best-effort)
             const [first_name, ...rest] = name.trim().split(' ');
             const last_name = rest.join(' ') || '';
-            const userRes = await client.query(`INSERT INTO users (role_id, first_name, last_name, email, password_hash, phone, organization_id, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING id`, [roleId, first_name, last_name, email, hash, phone ?? null, organization_id ?? null]);
+            const userRes = await client.query(`INSERT INTO users (role_id, first_name, last_name, email, password_hash, phone, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,true) RETURNING id`, [roleId, first_name, last_name, email, hash, phone ?? null]);
             const newUserId = userRes.rows[0].id;
-            await client.query(`INSERT INTO lab_staff_profiles (user_id, name, phone, email, organization_id)
-         VALUES ($1,$2,$3,$4,$5)`, [newUserId, name, phone ?? null, email, organization_id ?? null]);
+            await client.query(`INSERT INTO lab_staff_profiles (user_id, name, phone, email, branch_id)
+         VALUES ($1,$2,$3,$4,$5)`, [newUserId, name, phone ?? null, email, branch_id ?? null]);
             await client.query('COMMIT');
             res.status(201).json({ success: true, message: 'Lab staff registered successfully' });
         }

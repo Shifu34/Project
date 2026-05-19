@@ -17,21 +17,31 @@ const generateToken = async (req, res, next) => {
         const appointmentId = req.body?.appointment_id ? Number(req.body.appointment_id) : null;
         const isDoctor = roleName === 'doctor';
         const isAdmin = roleName === 'admin' || roleName === 'super_admin';
+        const isLabStaff = roleName === 'lab_staff';
         let identity;
         let agentName;
+        let roomPrefix;
         if (isAdmin) {
             identity = `admin-${userId}`;
             agentName = 'murshid-admin-agent';
+            roomPrefix = 'admin';
         }
         else if (isDoctor) {
             identity = `doctor-${userId}`;
             agentName = 'murshid-doctor-agent';
+            roomPrefix = 'voice';
+        }
+        else if (isLabStaff) {
+            identity = `lab-${userId}`;
+            agentName = 'murshid-lab-agent';
+            roomPrefix = 'lab';
         }
         else {
             identity = `patient-${userId}`;
             agentName = 'murshid-hospital-agent';
+            roomPrefix = 'voice';
         }
-        const roomName = `${isAdmin ? 'admin' : 'voice'}-${userId}-${Math.floor(Date.now() / 1000)}`;
+        const roomName = `${roomPrefix}-${userId}-${Math.floor(Date.now() / 1000)}`;
         // Metadata passed to both the participant token and agent dispatch.
         // Agent code reads token (for auth), role (for routing), intent (for sub-agent routing),
         // and appointment_id (for doctor context).

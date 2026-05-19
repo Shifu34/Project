@@ -19,9 +19,8 @@ exports.getDepartmentLocations = getDepartmentLocations;
 const getDepartments = async (_req, res, next) => {
     try {
         const result = await (0, database_1.query)(`SELECT d.*, CONCAT(u.first_name,' ',u.last_name) AS head_doctor_name
-       FROM departments d
-       LEFT JOIN doctors doc ON doc.id = d.head_doctor_id
-       LEFT JOIN users u ON u.id = doc.user_id
+      FROM departments d
+       LEFT JOIN users u ON u.id = d.head_user_id
        ORDER BY d.name ASC`);
         res.json({ success: true, data: result.rows });
     }
@@ -34,9 +33,8 @@ exports.getDepartments = getDepartments;
 const getDepartmentById = async (req, res, next) => {
     try {
         const result = await (0, database_1.query)(`SELECT d.*, CONCAT(u.first_name,' ',u.last_name) AS head_doctor_name
-       FROM departments d
-       LEFT JOIN doctors doc ON doc.id = d.head_doctor_id
-       LEFT JOIN users u ON u.id = doc.user_id
+      FROM departments d
+       LEFT JOIN users u ON u.id = d.head_user_id
        WHERE d.id = $1`, [req.params.id]);
         if (result.rows.length === 0) {
             res.status(404).json({ success: false, message: 'Department not found' });
@@ -52,9 +50,9 @@ exports.getDepartmentById = getDepartmentById;
 // POST /departments
 const createDepartment = async (req, res, next) => {
     try {
-        const { name, description, head_doctor_id, phone, location } = req.body;
-        const result = await (0, database_1.query)(`INSERT INTO departments (name, description, head_doctor_id, phone, location)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`, [name, description, head_doctor_id, phone, location]);
+        const { name, description, branch_id, head_user_id, phone, location } = req.body;
+        const result = await (0, database_1.query)(`INSERT INTO departments (name, description, branch_id, head_user_id, phone, location)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [name, description, branch_id, head_user_id ?? null, phone, location]);
         res.status(201).json({ success: true, data: result.rows[0] });
     }
     catch (err) {
@@ -65,10 +63,10 @@ exports.createDepartment = createDepartment;
 // PUT /departments/:id
 const updateDepartment = async (req, res, next) => {
     try {
-        const { name, description, head_doctor_id, phone, location, is_active } = req.body;
+        const { name, description, branch_id, head_user_id, phone, location, is_active } = req.body;
         const result = await (0, database_1.query)(`UPDATE departments
-       SET name=$1, description=$2, head_doctor_id=$3, phone=$4, location=$5, is_active=$6
-       WHERE id = $7 RETURNING *`, [name, description, head_doctor_id, phone, location, is_active, req.params.id]);
+       SET name=$1, description=$2, branch_id=$3, head_user_id=$4, phone=$5, location=$6, is_active=$7
+       WHERE id = $8 RETURNING *`, [name, description, branch_id, head_user_id ?? null, phone, location, is_active, req.params.id]);
         if (result.rows.length === 0) {
             res.status(404).json({ success: false, message: 'Department not found' });
             return;

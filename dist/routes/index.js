@@ -21,6 +21,7 @@ const report_routes_1 = __importDefault(require("./report.routes"));
 const ai_summary_routes_1 = __importDefault(require("./ai-summary.routes"));
 const call_transcription_routes_1 = __importDefault(require("./call-transcription.routes"));
 const organization_routes_1 = __importDefault(require("./organization.routes"));
+const notification_routes_1 = __importDefault(require("./notification.routes"));
 const dashboard_controller_1 = require("../controllers/dashboard.controller");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = (0, express_1.Router)();
@@ -42,6 +43,7 @@ router.use('/reports', report_routes_1.default);
 router.use('/ai-summaries', ai_summary_routes_1.default);
 router.use('/call-transcriptions', call_transcription_routes_1.default);
 router.use('/organizations', organization_routes_1.default);
+router.use('/notifications', notification_routes_1.default);
 router.get('/dashboard', auth_middleware_1.authenticate, dashboard_controller_1.getDashboardStats);
 exports.default = router;
 //# sourceMappingURL=index.js.map

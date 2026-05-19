@@ -43,6 +43,6 @@ router.use(auth_middleware_1.authenticate);
 router.get('/active', prescCtrl.getActivePatientMedications);
 router.get('/', prescCtrl.getPrescriptions);
 router.get('/:id', prescCtrl.getPrescriptionById);
-router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('encounter_id').isInt(), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('items').isArray({ min: 1 }), validate_middleware_1.validate, prescCtrl.createPrescription);
+router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('encounter_id').isInt(), (0, express_validator_1.body)('patient_user_id').isInt(), (0, express_validator_1.body)('doctor_user_id').isInt(), (0, express_validator_1.body)('items').isArray({ min: 1 }), validate_middleware_1.validate, prescCtrl.createPrescription);
 exports.default = router;
 //# sourceMappingURL=prescription.routes.js.map

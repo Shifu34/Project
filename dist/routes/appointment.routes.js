@@ -54,7 +54,7 @@ router.get('/:id/smart', visit_controller_1.getAppointmentSmart);
 router.get('/:id/encounter', apptCtrl.getAppointmentEncounter);
 router.post('/:id/encounter', (0, auth_middleware_1.authorize)('admin', 'doctor'), apptCtrl.saveAppointmentEncounter);
 router.put('/:id/encounter', (0, auth_middleware_1.authorize)('admin', 'doctor'), apptCtrl.updateAppointmentEncounter);
-router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('appointment_date').isISO8601(), (0, express_validator_1.body)('appointment_time').matches(/^\d{2}:\d{2}$/), validate_middleware_1.validate, apptCtrl.createAppointment);
+router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), (0, express_validator_1.body)('patient_user_id').isInt(), (0, express_validator_1.body)('doctor_user_id').isInt(), (0, express_validator_1.body)('doctor_branch_id').isInt(), (0, express_validator_1.body)('appointment_date').isISO8601(), (0, express_validator_1.body)('appointment_time').matches(/^\d{2}:\d{2}$/), validate_middleware_1.validate, apptCtrl.createAppointment);
 router.patch('/:id/cancel', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), apptCtrl.cancelAppointment);
 router.patch('/:id', (0, auth_middleware_1.authorize)('admin', 'doctor', 'patient'), apptCtrl.patchAppointment);
 router.put('/:id', (0, auth_middleware_1.authorize)('admin', 'doctor'), validate_middleware_1.validate, apptCtrl.updateAppointment);

@@ -4,24 +4,24 @@ exports.getAiSummaries = exports.getAiSummaryById = exports.getCallSummary = exp
 const database_1 = require("../config/database");
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /ai-summaries
-// Body: { summary_type, content, patient_id, appointment_id?, encounter_id?,
+// Body: { summary_type, content, patient_user_id, appointment_id?, encounter_id?,
 //         report_id?, lab_order_id?, radiology_order_id?, prescription_id?,
-//         doctor_id?, ai_model?, language? }
+//         doctor_user_id?, ai_model?, language? }
 // ─────────────────────────────────────────────────────────────────────────────
 const createAiSummary = async (req, res, next) => {
     try {
-        const { summary_type, content, patient_id, appointment_id = null, encounter_id = null, report_id = null, lab_order_id = null, radiology_order_id = null, prescription_id = null, doctor_id = null, ai_model = null, language = 'en', structured_data = null, } = req.body;
+        const { summary_type, content, patient_user_id, appointment_id = null, encounter_id = null, report_id = null, lab_order_id = null, radiology_order_id = null, prescription_id = null, doctor_user_id = null, ai_model = null, language = 'en', structured_data = null, } = req.body;
         const result = await (0, database_1.query)(`INSERT INTO ai_summaries
-         (summary_type, content, structured_data, patient_id, appointment_id, encounter_id,
+         (summary_type, content, structured_data, patient_user_id, appointment_id, encounter_id,
           report_id, lab_order_id, radiology_order_id, prescription_id,
-          doctor_id, ai_model, language, generated_by)
+          doctor_user_id, ai_model, language, generated_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`, [
             summary_type, content,
             structured_data ? JSON.stringify(structured_data) : null,
-            patient_id, appointment_id, encounter_id,
+            patient_user_id, appointment_id, encounter_id,
             report_id, lab_order_id, radiology_order_id, prescription_id,
-            doctor_id, ai_model, language, req.user?.userId ?? null,
+            doctor_user_id, ai_model, language, req.user?.userId ?? null,
         ]);
         res.status(201).json({ success: true, data: result.rows[0] });
     }
@@ -34,24 +34,24 @@ exports.createAiSummary = createAiSummary;
 // POST /ai-summaries/call-summary
 // Convenience wrapper: saves a post-call summary (summary_type='call') visible
 // to both doctor and patient. Links to appointment (and optionally encounter).
-// Body: { appointment_id, patient_id, doctor_id?, content, structured_data?,
-//         encounter_id?, ai_model?, language? }
+// Body: { appointment_id, patient_user_id, doctor_user_id?, content,
+//         structured_data?, encounter_id?, ai_model?, language? }
 // ─────────────────────────────────────────────────────────────────────────────
 const createCallSummary = async (req, res, next) => {
     try {
-        const { appointment_id, patient_id, doctor_id = null, encounter_id = null, content, structured_data = null, ai_model = null, language = 'en', } = req.body;
-        if (!appointment_id || !patient_id || !content) {
-            res.status(400).json({ success: false, message: 'appointment_id, patient_id and content are required' });
+        const { appointment_id, patient_user_id, doctor_user_id = null, encounter_id = null, content, structured_data = null, ai_model = null, language = 'en', } = req.body;
+        if (!appointment_id || !patient_user_id || !content) {
+            res.status(400).json({ success: false, message: 'appointment_id, patient_user_id and content are required' });
             return;
         }
         const result = await (0, database_1.query)(`INSERT INTO ai_summaries
-         (summary_type, content, structured_data, patient_id, appointment_id,
-          encounter_id, doctor_id, ai_model, language, generated_by)
+         (summary_type, content, structured_data, patient_user_id, appointment_id,
+          encounter_id, doctor_user_id, ai_model, language, generated_by)
        VALUES ('call',$1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`, [
             content,
             structured_data ? JSON.stringify(structured_data) : null,
-            patient_id, appointment_id, encounter_id, doctor_id,
+            patient_user_id, appointment_id, encounter_id, doctor_user_id,
             ai_model, language, req.user?.userId ?? null,
         ]);
         res.status(201).json({ success: true, data: result.rows[0] });
@@ -78,8 +78,8 @@ const getCallSummary = async (req, res, next) => {
               d.first_name || ' ' || d.last_name   AS doctor_name
        FROM ai_summaries s
        LEFT JOIN users    u ON u.id = s.generated_by
-       LEFT JOIN patients p ON p.id = s.patient_id
-       LEFT JOIN doctors  d ON d.id = s.doctor_id
+       LEFT JOIN patients p ON p.user_id = s.patient_user_id
+       LEFT JOIN doctors  d ON d.user_id = s.doctor_user_id
        WHERE s.appointment_id = $1
          AND s.summary_type   = 'call'
        ORDER BY s.created_at DESC`, [appointment_id]);
@@ -113,7 +113,7 @@ const getAiSummaryById = async (req, res, next) => {
 exports.getAiSummaryById = getAiSummaryById;
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /ai-summaries
-// Query: patient_id, summary_type, appointment_id, encounter_id,
+// Query: patient_user_id, summary_type, appointment_id, encounter_id,
 //        report_id, lab_order_id, radiology_order_id, prescription_id,
 //        page, limit
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ const getAiSummaries = async (req, res, next) => {
         const filterVals = [];
         const conditions = [];
         const qs = req.query;
-        for (const col of ['patient_id', 'summary_type', 'appointment_id', 'encounter_id', 'report_id', 'lab_order_id', 'radiology_order_id', 'prescription_id']) {
+        for (const col of ['patient_user_id', 'summary_type', 'appointment_id', 'encounter_id', 'report_id', 'lab_order_id', 'radiology_order_id', 'prescription_id']) {
             if (qs[col]) {
                 filterVals.push(qs[col]);
                 conditions.push(`s.${col} = $${filterVals.length}`);
@@ -137,9 +137,9 @@ const getAiSummaries = async (req, res, next) => {
         // Data query appends limit/offset AFTER filter values
         const limitIdx = filterVals.length + 1;
         const offsetIdx = filterVals.length + 2;
-        const dataRes = await (0, database_1.query)(`SELECT s.id, s.summary_type, s.patient_id, s.appointment_id,
+        const dataRes = await (0, database_1.query)(`SELECT s.id, s.summary_type, s.patient_user_id, s.appointment_id,
               s.encounter_id, s.report_id, s.lab_order_id,
-              s.radiology_order_id, s.prescription_id, s.doctor_id,
+              s.radiology_order_id, s.prescription_id, s.doctor_user_id,
               s.ai_model, s.language, s.created_at, s.structured_data,
               s.content,
               CONCAT(u.first_name,' ',u.last_name) AS generated_by_name

@@ -45,10 +45,10 @@ router.get('/:id/full', visitCtrl.getEncounterFull);
 router.get('/:id/smart', visitCtrl.getEncounterSmart);
 router.get('/:id/diagnoses', visitCtrl.getVisitDiagnoses);
 router.get('/:id/vitals', visitCtrl.getEncounterVitals);
-router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), validate_middleware_1.validate, visitCtrl.createVisit);
+router.post('/', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_user_id').isInt(), (0, express_validator_1.body)('doctor_user_id').isInt(), validate_middleware_1.validate, visitCtrl.createVisit);
 router.put('/:id', (0, auth_middleware_1.authorize)('admin', 'doctor'), validate_middleware_1.validate, visitCtrl.updateVisit);
-router.post('/:id/vitals', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_id').isInt(), validate_middleware_1.validate, visitCtrl.recordVitalSigns);
-router.post('/:id/diagnoses', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_id').isInt(), (0, express_validator_1.body)('doctor_id').isInt(), (0, express_validator_1.body)('diagnosis_text').notEmpty(), validate_middleware_1.validate, visitCtrl.addDiagnosis);
+router.post('/:id/vitals', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_user_id').isInt(), validate_middleware_1.validate, visitCtrl.recordVitalSigns);
+router.post('/:id/diagnoses', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('patient_user_id').isInt(), (0, express_validator_1.body)('doctor_user_id').isInt(), (0, express_validator_1.body)('diagnosis_text').notEmpty(), validate_middleware_1.validate, visitCtrl.addDiagnosis);
 router.post('/:id/clinical-notes', (0, auth_middleware_1.authorize)('admin', 'doctor'), (0, express_validator_1.body)('content').notEmpty(), validate_middleware_1.validate, visitCtrl.addClinicalNote);
 exports.default = router;
 //# sourceMappingURL=visit.routes.js.map

@@ -59,7 +59,7 @@ router.get('/rooms', (0, auth_middleware_1.authorize)('admin'), callCtrl.listRoo
 // GET    /calls/notes/:id          — single note (doctor/admin)
 router.post('/notes', [
     (0, express_validator_1.body)('appointment_id').isInt({ min: 1 }),
-    (0, express_validator_1.body)('patient_id').isInt({ min: 1 }),
+    (0, express_validator_1.body)('patient_user_id').isInt({ min: 1 }),
     (0, express_validator_1.body)('note_type').optional().isIn(['realtime', 'interim', 'final']),
 ], validate_middleware_1.validate, notesCtrl.createCallNote);
 router.get('/notes', (0, auth_middleware_1.authorize)('admin', 'doctor'), notesCtrl.getCallNotes);

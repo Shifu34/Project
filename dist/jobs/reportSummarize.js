@@ -75,8 +75,8 @@ async function buildPrompt(reportId) {
             e.assessment,
             e.plan
      FROM medical_reports mr
-     JOIN patients p ON p.id = mr.patient_id
-     LEFT JOIN doctors d ON d.id = mr.doctor_id
+            JOIN patients p ON p.user_id = mr.patient_user_id
+              LEFT JOIN doctors d ON d.user_id = mr.doctor_user_id
      LEFT JOIN users u ON u.id = d.user_id
      LEFT JOIN encounters e ON e.id = mr.encounter_id
      WHERE mr.id = $1`, [reportId]);
