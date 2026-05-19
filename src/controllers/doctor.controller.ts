@@ -1248,40 +1248,88 @@ export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next
   }
 };
 
-// GET /doctors/:id/booked-appointments?date=YYYY-MM-DD
+// GET /doctor-booked-appointments?doctor_user_id=...&doctor_branch_id=...&date=YYYY-MM-DD
 export const getDoctorBookedAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
-    const branchId = getBranchIdFromRequest(req);
-    if (!branchId) {
-      res.status(400).json({ success: false, message: 'branch_id is required' });
+    const doctorUserId = getDoctorUserIdFromRequest(req);
+    if (!doctorUserId) {
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
       return;
     }
 
-    const doctorUserId = await getDoctorUserId(Number(req.params.id), branchId);
-    if (!doctorUserId) {
+    const branchId = getDoctorBranchIdFromRequest(req);
+
+    const fetchAppointments = async (branch: number) => {
+      const result = await query(
+        `SELECT a.*,
+                nov.name AS nature_of_visit,
+                CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
+                p.patient_code, p.phone AS patient_phone
+         FROM appointments a
+         JOIN patients p ON p.user_id = a.patient_user_id
+         LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
+         WHERE a.doctor_user_id = $1
+           AND a.doctor_branch_id = $2
+           AND a.appointment_date = $3
+           AND a.status NOT IN ('cancelled', 'no_show')
+         ORDER BY a.appointment_time ASC`,
+        [doctorUserId, branch, date],
+      );
+      return result.rows;
+    };
+
+    if (branchId) {
+      const doctorRes = await query(
+        `SELECT employee_id
+         FROM doctors
+         WHERE user_id = $1 AND branch_id = $2
+         LIMIT 1`,
+        [doctorUserId, branchId],
+      );
+      if (doctorRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Doctor not found' });
+        return;
+      }
+
+      const appointments = await fetchAppointments(branchId);
+      res.json({
+        success: true,
+        data: {
+          doctor_id: Number(doctorRes.rows[0].employee_id),
+          doctor_user_id: doctorUserId,
+          doctor_branch_id: branchId,
+          date,
+          appointments,
+        },
+      });
+      return;
+    }
+
+    const branchesRes = await query(
+      `SELECT employee_id, branch_id
+       FROM doctors
+       WHERE user_id = $1
+       ORDER BY branch_id`,
+      [doctorUserId],
+    );
+
+    if (branchesRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Doctor not found' });
       return;
     }
 
-    const result = await query(
-      `SELECT a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
-              a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason,
-              p.user_id AS patient_user_id,
-              CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-              p.patient_code, p.phone AS patient_phone
-       FROM appointments a
-       JOIN patients p ON p.user_id = a.patient_user_id
-       LEFT JOIN nature_of_visit nov ON nov.id = a.nature_of_visit_id
-       WHERE a.doctor_user_id = $1
-         AND a.doctor_branch_id = $2
-         AND a.appointment_date = $3
-         AND a.status NOT IN ('cancelled', 'no_show')
-       ORDER BY a.appointment_time ASC`,
-      [doctorUserId, branchId, date],
+    const results = await Promise.all(
+      branchesRes.rows.map(async (row) => ({
+        doctor_id: Number(row.employee_id),
+        doctor_user_id: doctorUserId,
+        doctor_branch_id: Number(row.branch_id),
+        date,
+        appointments: await fetchAppointments(Number(row.branch_id)),
+      })),
     );
 
-    res.json({ success: true, data: { doctor_id: Number(req.params.id), doctor_user_id: doctorUserId, doctor_branch_id: branchId, date, appointments: result.rows } });
+    res.json({ success: true, data: results });
   } catch (err) {
     next(err);
   }

@@ -14,7 +14,6 @@ router.get('/specializations', doctorCtrl.getAllSpecializations);
 router.get('/stats/departments', doctorCtrl.getDoctorDeptStats);
 router.get('/',    doctorCtrl.getDoctors);
 router.get('/me',  doctorCtrl.getDoctorByUserId);
-router.get('/:id/booked-appointments', doctorCtrl.getDoctorBookedAppointments);
 router.get('/:id/specialization', doctorCtrl.getDoctorSpecialization);
 router.get('/:id', doctorCtrl.getDoctorById);
 router.get('/:id/appointments', doctorCtrl.getDoctorAppointments);

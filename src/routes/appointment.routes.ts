@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { body } from 'express-validator';
 import * as apptCtrl from '../controllers/appointment.controller';
 import { getAppointmentSmart } from '../controllers/visit.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
@@ -11,8 +10,6 @@ router.use(authenticate);
 
 // Fixed path routes first (before /:id)
 router.get('/',                 authorize('admin', 'doctor', 'super_admin'), apptCtrl.getAppointments);
-router.get('/me',               apptCtrl.getMyAppointments);
-router.get('/upcoming',         apptCtrl.getUpcomingAppointment);
 router.get('/categories',       apptCtrl.getAppointmentCategories);
 router.get('/nature-of-visits', apptCtrl.getNatureOfVisits);
 router.get('/range',            authorize('admin', 'doctor', 'super_admin'), apptCtrl.getAppointmentsByDateRange);
@@ -33,27 +30,6 @@ router.post('/:id/encounter',
 router.put('/:id/encounter',
   authorize('admin', 'doctor'),
   apptCtrl.updateAppointmentEncounter,
-);
-
-router.post('/',
-  authorize('admin', 'doctor', 'patient'),
-  body('patient_user_id').isInt(),
-  body('doctor_user_id').isInt(),
-  body('doctor_branch_id').isInt(),
-  body('appointment_date').isISO8601(),
-  body('appointment_time').matches(/^\d{2}:\d{2}$/),
-  validate,
-  apptCtrl.createAppointment,
-);
-
-router.patch('/:id/cancel',
-  authorize('admin', 'doctor', 'patient'),
-  apptCtrl.cancelAppointment,
-);
-
-router.patch('/:id',
-  authorize('admin', 'doctor', 'patient'),
-  apptCtrl.patchAppointment,
 );
 
 router.put('/:id', authorize('admin', 'doctor'), validate, apptCtrl.updateAppointment);

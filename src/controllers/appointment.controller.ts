@@ -2,6 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 
+const getAppointmentIdFromRequest = (req: Request): number | null => {
+  const raw = (req.query.appointment_id ?? req.body.appointment_id ?? req.params.id) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 // GET /appointments
 export const getAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -98,6 +105,124 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
       duration_minutes, appointment_type, nature_of_visit_id, nature_of_visit, reason, notes,
     } = req.body;
 
+    let patientUserId: number | null = null;
+    let doctorUserId: number | null = null;
+    let doctorBranchId: number | null = null;
+
+    const patientUserIdRaw = req.body.patient_user_id ?? req.query.patient_user_id;
+    if (patientUserIdRaw !== undefined && patientUserIdRaw !== null && patientUserIdRaw !== '') {
+      const parsed = Number(patientUserIdRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        res.status(400).json({ success: false, message: 'patient_user_id must be a valid number' });
+        return;
+      }
+      patientUserId = parsed;
+    }
+
+    if (!patientUserId) {
+      const patientIdRaw = req.body.patient_id ?? req.query.patient_id;
+      if (patientIdRaw !== undefined && patientIdRaw !== null && patientIdRaw !== '') {
+        const patientId = Number(patientIdRaw);
+        if (!Number.isFinite(patientId) || patientId <= 0) {
+          res.status(400).json({ success: false, message: 'patient_id must be a valid number' });
+          return;
+        }
+        const patientRes = await query(
+          `SELECT user_id FROM patients WHERE id = $1 LIMIT 1`,
+          [patientId],
+        );
+        if (patientRes.rows.length === 0) {
+          res.status(404).json({ success: false, message: 'Patient not found' });
+          return;
+        }
+        patientUserId = patientRes.rows[0].user_id;
+      }
+    }
+
+    if (!patientUserId) {
+      res.status(400).json({ success: false, message: 'patient_user_id or patient_id is required' });
+      return;
+    }
+
+    const doctorUserIdRaw = req.body.doctor_user_id ?? req.query.doctor_user_id;
+    if (doctorUserIdRaw !== undefined && doctorUserIdRaw !== null && doctorUserIdRaw !== '') {
+      const parsed = Number(doctorUserIdRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        res.status(400).json({ success: false, message: 'doctor_user_id must be a valid number' });
+        return;
+      }
+      doctorUserId = parsed;
+    }
+
+    const doctorBranchIdRaw = req.body.doctor_branch_id ?? req.query.doctor_branch_id ?? req.body.branch_id ?? req.query.branch_id;
+    if (doctorBranchIdRaw !== undefined && doctorBranchIdRaw !== null && doctorBranchIdRaw !== '') {
+      const parsed = Number(doctorBranchIdRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        res.status(400).json({ success: false, message: 'doctor_branch_id must be a valid number' });
+        return;
+      }
+      doctorBranchId = parsed;
+    }
+
+    if (!doctorUserId) {
+      const doctorIdRaw = req.body.doctor_id ?? req.query.doctor_id;
+      if (doctorIdRaw !== undefined && doctorIdRaw !== null && doctorIdRaw !== '') {
+        const doctorId = Number(doctorIdRaw);
+        if (!Number.isFinite(doctorId) || doctorId <= 0) {
+          res.status(400).json({ success: false, message: 'doctor_id must be a valid number' });
+          return;
+        }
+
+        const doctorRes = await query(
+          `SELECT user_id, branch_id
+           FROM doctors
+           WHERE employee_id = $1${doctorBranchId ? ' AND branch_id = $2' : ''}
+           ORDER BY branch_id`,
+          doctorBranchId ? [doctorId, doctorBranchId] : [doctorId],
+        );
+
+        if (doctorRes.rows.length === 0) {
+          res.status(404).json({ success: false, message: 'Doctor not found' });
+          return;
+        }
+
+        if (!doctorBranchId && doctorRes.rows.length > 1) {
+          res.status(400).json({ success: false, message: 'doctor_branch_id is required for this doctor' });
+          return;
+        }
+
+        doctorUserId = doctorRes.rows[0].user_id;
+        doctorBranchId = doctorBranchId ?? doctorRes.rows[0].branch_id;
+      }
+    }
+
+    if (!doctorUserId) {
+      res.status(400).json({ success: false, message: 'doctor_user_id or doctor_id is required' });
+      return;
+    }
+
+    if (!doctorBranchId) {
+      const branchRes = await query(
+        `SELECT branch_id
+         FROM doctors
+         WHERE user_id = $1
+         ORDER BY branch_id`,
+        [doctorUserId],
+      );
+
+      if (branchRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Doctor not found' });
+        return;
+      }
+
+      if (branchRes.rows.length > 1) {
+        res.status(400).json({ success: false, message: 'doctor_branch_id is required' });
+        return;
+      }
+
+      doctorBranchId = branchRes.rows[0].branch_id;
+    }
+
     const bookedBy = (req as Request & { user?: { userId: number } }).user?.userId;
 
     // Resolve nature_of_visit_id: accept either the ID directly or a name string
@@ -118,7 +243,7 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
        WHERE doctor_user_id = $1 AND doctor_branch_id = $2
          AND appointment_date = $3 AND appointment_time = $4
          AND status NOT IN ('cancelled','no_show')`,
-      [doctor_user_id, doctor_branch_id, appointment_date, appointment_time],
+      [doctorUserId, doctorBranchId, appointment_date, appointment_time],
     );
     if (conflict.rows.length > 0) {
       res.status(409).json({ success: false, message: 'Doctor already has an appointment at this time' });
@@ -130,7 +255,7 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
         (patient_user_id, doctor_user_id, doctor_branch_id, appointment_date, appointment_time,
          duration_minutes, appointment_type, nature_of_visit_id, reason, notes, booked_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [patient_user_id, doctor_user_id, doctor_branch_id, appointment_date, appointment_time,
+      [patientUserId, doctorUserId, doctorBranchId, appointment_date, appointment_time,
        duration_minutes || 30, appointment_type || 'Online Consultation', resolvedNatureId, reason, notes, bookedBy],
      );
 
@@ -262,15 +387,16 @@ export const getMyAppointments = async (req: AuthRequest, res: Response, next: N
     const [dataRes, countRes] = await Promise.all([
       query(
         `SELECT
-           a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
-           a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason, a.notes,
-           a.cancellation_reason, a.created_at,
-           p.user_id AS patient_user_id, CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code, p.phone AS patient_phone,
-           p.gender AS patient_gender, DATE_PART('year', AGE(p.date_of_birth))::INT AS patient_age,
-           doc.user_id AS doctor_user_id,
-           a.doctor_branch_id,
+           a.*,
+           nov.name AS nature_of_visit,
+           CONCAT(p.first_name,' ',p.last_name) AS patient_name,
+           p.patient_code,
+           p.phone AS patient_phone,
+           p.gender AS patient_gender,
+           DATE_PART('year', AGE(p.date_of_birth))::INT AS patient_age,
            CONCAT(doc.first_name,' ',doc.last_name) AS doctor_name,
-           doc.specialization, doc.consultation_fee,
+           doc.specialization,
+           doc.consultation_fee,
            dept.name AS department
          FROM appointments a
          JOIN patients p   ON p.user_id   = a.patient_user_id
@@ -348,15 +474,16 @@ export const getUpcomingAppointment = async (req: AuthRequest, res: Response, ne
 
     const result = await query(
       `SELECT
-         a.id, a.appointment_date, a.appointment_time, a.duration_minutes,
-         a.appointment_type, nov.name AS nature_of_visit, a.nature_of_visit_id, a.status, a.reason, a.notes,
-         a.created_at,
-         p.user_id AS patient_user_id, CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
-         p.gender AS patient_gender, DATE_PART('year', AGE(p.date_of_birth))::INT AS patient_age,
-         doc.user_id AS doctor_user_id,
-         a.doctor_branch_id,
+         a.*,
+         nov.name AS nature_of_visit,
+         CONCAT(p.first_name,' ',p.last_name) AS patient_name,
+         p.patient_code,
+         p.phone AS patient_phone,
+         p.gender AS patient_gender,
+         DATE_PART('year', AGE(p.date_of_birth))::INT AS patient_age,
          CONCAT(doc.first_name,' ',doc.last_name) AS doctor_name,
-         doc.specialization, doc.consultation_fee,
+         doc.specialization,
+         doc.consultation_fee,
          dept.name AS department
        FROM appointments a
        JOIN patients p   ON p.user_id   = a.patient_user_id
@@ -382,6 +509,12 @@ export const getUpcomingAppointment = async (req: AuthRequest, res: Response, ne
 // PATCH /appointments/:id  — partial update (any subset of fields)
 export const patchAppointment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const appointmentId = getAppointmentIdFromRequest(req);
+    if (!appointmentId) {
+      res.status(400).json({ success: false, message: 'appointment_id is required' });
+      return;
+    }
+
     const allowed = [
       'appointment_date', 'appointment_time', 'duration_minutes',
       'appointment_type', 'nature_of_visit_id', 'reason', 'notes',
@@ -408,7 +541,7 @@ export const patchAppointment = async (req: AuthRequest, res: Response, next: Ne
     }
 
     sets.push('updated_at = CURRENT_TIMESTAMP');
-    params.push(req.params.id);
+    params.push(appointmentId);
 
     const result = await query(
       `UPDATE appointments SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
@@ -428,6 +561,12 @@ export const patchAppointment = async (req: AuthRequest, res: Response, next: Ne
 // PATCH /appointments/:id/cancel
 export const cancelAppointment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const appointmentId = getAppointmentIdFromRequest(req);
+    if (!appointmentId) {
+      res.status(400).json({ success: false, message: 'appointment_id is required' });
+      return;
+    }
+
     const { cancellation_reason } = req.body;
     const cancelledBy = req.user?.userId;
 
@@ -440,11 +579,11 @@ export const cancelAppointment = async (req: AuthRequest, res: Response, next: N
        WHERE id = $3
          AND status NOT IN ('cancelled', 'completed', 'no_show')
        RETURNING *`,
-      [cancelledBy ?? null, cancellation_reason ?? null, req.params.id],
+      [cancelledBy ?? null, cancellation_reason ?? null, appointmentId],
     );
 
     if (result.rows.length === 0) {
-      const exists = await query(`SELECT status FROM appointments WHERE id = $1`, [req.params.id]);
+      const exists = await query(`SELECT status FROM appointments WHERE id = $1`, [appointmentId]);
       if (exists.rows.length === 0) {
         res.status(404).json({ success: false, message: 'Appointment not found' });
       } else {
