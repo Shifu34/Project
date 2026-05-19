@@ -85,9 +85,10 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
 
     // 1. Fetch appointment ------------------------------------------------
     const apptResult = await query(
-      `SELECT a.id, a.patient_user_id, a.doctor_user_id, a.doctor_branch_id, a.appointment_type, a.reason,
+            `SELECT a.id, a.patient_user_id, a.doctor_user_id, a.doctor_branch_id, a.appointment_type, a.reason,
               p.first_name || ' ' || p.last_name AS patient_name,
               d.first_name || ' ' || d.last_name AS doctor_name,
+              d.employee_id AS doctor_id,
               d.user_id AS doctor_user_id,
               u.role_id AS doctor_role_id,
               r.name AS doctor_role_name,
@@ -162,6 +163,9 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
         roleId:   appt.doctor_role_id,
         roleName: appt.doctor_role_name ?? 'doctor',
         email:    appt.doctor_email,
+        doctorId: appt.doctor_id,
+        doctorUserId: appt.doctor_user_id,
+        doctorBranchId: appt.doctor_branch_id,
       };
       const doctorToken = jwt.sign(doctorPayload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
 

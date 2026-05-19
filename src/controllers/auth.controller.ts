@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { query, getClient } from '../config/database';
 import { env } from '../config/env';
 import { sendPasswordResetCode, sendRegistrationCode } from '../config/mailer';
+import { AuthPayload } from '../types';
 
 // POST /auth/register — patient self-registration
 export const registerPatient = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -150,11 +151,16 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       }
     }
 
-    const payload = {
+    const payload: AuthPayload = {
       userId: user.id,
       roleId: user.role_id,
       roleName: user.role_name,
       email: user.email,
+      ...(user.role_name === 'patient' && { patientUserId: user.id }),
+      ...(patientData.id !== undefined && { patientId: patientData.id }),
+      ...(user.role_name === 'doctor' && { doctorUserId: user.id }),
+      ...(doctorId !== null && { doctorId }),
+      ...(doctorBranchId !== null && { doctorBranchId }),
     };
     const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
     const refreshToken = jwt.sign(payload, env.jwtRefreshSecret, { expiresIn: env.jwtRefreshExpiresIn } as jwt.SignOptions);
@@ -193,12 +199,22 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       return;
     }
 
-    const decoded = jwt.verify(token, env.jwtRefreshSecret) as {
-      userId: number; roleId: number; roleName: string; email: string;
+    const decoded = jwt.verify(token, env.jwtRefreshSecret) as AuthPayload;
+
+    const payload: AuthPayload = {
+      userId: decoded.userId,
+      roleId: decoded.roleId,
+      roleName: decoded.roleName,
+      email: decoded.email,
+      ...(decoded.patientId !== undefined && { patientId: decoded.patientId }),
+      ...(decoded.patientUserId !== undefined && { patientUserId: decoded.patientUserId }),
+      ...(decoded.doctorId !== undefined && { doctorId: decoded.doctorId }),
+      ...(decoded.doctorUserId !== undefined && { doctorUserId: decoded.doctorUserId }),
+      ...(decoded.doctorBranchId !== undefined && { doctorBranchId: decoded.doctorBranchId }),
     };
 
     const newToken = jwt.sign(
-      { userId: decoded.userId, roleId: decoded.roleId, roleName: decoded.roleName, email: decoded.email },
+      payload,
       env.jwtSecret,
       { expiresIn: env.jwtExpiresIn } as jwt.SignOptions,
     );

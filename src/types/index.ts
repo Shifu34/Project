@@ -5,6 +5,11 @@ export interface AuthPayload {
   roleId: number;
   roleName: string;   // 'super_admin' | 'admin' | 'doctor' | 'patient'
   email: string;
+  patientId?: number;
+  patientUserId?: number;
+  doctorId?: number;
+  doctorUserId?: number;
+  doctorBranchId?: number;
 }
 
 export interface PaginationQuery {
