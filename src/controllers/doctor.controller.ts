@@ -579,12 +579,53 @@ export const searchAvailableDoctors = async (req: Request, res: Response, next: 
   }
 };
 
-// GET /doctors/:id/profile
+// GET /doctor-profile?doctor_user_id=...&doctor_branch_id=...
+// If doctor_branch_id is omitted, returns all doctor rows for the user.
 export const getDoctorProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const branchId = getBranchIdFromRequest(req);
-    if (!branchId) {
-      res.status(400).json({ success: false, message: 'branch_id is required' });
+    const doctorUserIdRaw = req.query.doctor_user_id ?? req.query.user_id ?? req.params.id;
+    const doctorUserId = Number(doctorUserIdRaw);
+    if (!Number.isFinite(doctorUserId) || doctorUserId <= 0) {
+      res.status(400).json({ success: false, message: 'doctor_user_id is required' });
+      return;
+    }
+
+    const branchIdRaw = (req.query.doctor_branch_id ?? req.query.branch_id) as string | number | undefined;
+    const branchId = branchIdRaw !== undefined && branchIdRaw !== null && branchIdRaw !== ''
+      ? Number(branchIdRaw)
+      : null;
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      res.status(400).json({ success: false, message: 'doctor_branch_id must be a valid number' });
+      return;
+    }
+
+    if (branchId !== null) {
+      const result = await query(
+        `SELECT d.employee_id AS id, d.branch_id, d.user_id,
+                COALESCE(u.first_name, d.first_name) AS first_name,
+                COALESCE(u.last_name,  d.last_name)  AS last_name,
+                COALESCE(u.email,      d.email)      AS email,
+                COALESCE(u.phone,      d.phone)      AS phone,
+                d.gender, d.date_of_birth, d.specialization, d.license_number,
+                d.qualification, d.experience_years, d.consultation_fee,
+                d.bio AS about, d.is_active,
+                dept.id AS department_id,
+                dept.name AS department,
+                d.created_at, d.updated_at
+         FROM doctors d
+         LEFT JOIN users u ON u.id = d.user_id
+         LEFT JOIN departments dept ON dept.id = d.department_id
+        WHERE d.user_id = $1 AND d.branch_id = $2
+         LIMIT 1`,
+        [doctorUserId, branchId],
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Doctor not found' });
+        return;
+      }
+
+      res.json({ success: true, data: result.rows[0] });
       return;
     }
 
@@ -603,9 +644,9 @@ export const getDoctorProfile = async (req: Request, res: Response, next: NextFu
        FROM doctors d
        LEFT JOIN users u ON u.id = d.user_id
        LEFT JOIN departments dept ON dept.id = d.department_id
-      WHERE d.employee_id = $1 AND d.branch_id = $2
-       LIMIT 1`,
-      [req.params.id, branchId],
+      WHERE d.user_id = $1
+       ORDER BY d.branch_id`,
+      [doctorUserId],
     );
 
     if (result.rows.length === 0) {
@@ -613,7 +654,7 @@ export const getDoctorProfile = async (req: Request, res: Response, next: NextFu
       return;
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    res.json({ success: true, data: result.rows });
   } catch (err) {
     next(err);
   }
