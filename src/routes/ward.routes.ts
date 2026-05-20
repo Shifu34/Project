@@ -13,7 +13,7 @@ router.get('/wards',     wardCtrl.getWards);
 router.get('/wards/:id', wardCtrl.getWardById);
 
 router.post('/wards',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('name').notEmpty(),
   validate,
   wardCtrl.createWard,
@@ -21,7 +21,7 @@ router.post('/wards',
 
 // Rooms
 router.post('/wards/:id/rooms',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('room_number').notEmpty(),
   validate,
   wardCtrl.addRoom,
@@ -29,7 +29,7 @@ router.post('/wards/:id/rooms',
 
 // Beds
 router.post('/rooms/:room_id/beds',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('bed_number').notEmpty(),
   validate,
   wardCtrl.addBed,
@@ -40,7 +40,7 @@ router.get('/admissions',     wardCtrl.getAdmissions);
 router.get('/admissions/:id', wardCtrl.getAdmissionById);
 
 router.post('/admissions',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('patient_user_id').isInt(),
   body('doctor_user_id').isInt(),
   body('bed_id').isInt(),
@@ -50,7 +50,7 @@ router.post('/admissions',
 );
 
 router.post('/admissions/:id/discharge',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   validate,
   wardCtrl.dischargePatient,
 );

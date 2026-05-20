@@ -13,7 +13,7 @@ router.get('/',    prescCtrl.getPrescriptions);
 router.get('/:id', prescCtrl.getPrescriptionById);
 
 router.post('/',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('encounter_id').isInt(),
   body('patient_user_id').isInt(),
   body('doctor_user_id').isInt(),

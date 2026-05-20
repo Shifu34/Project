@@ -15,7 +15,7 @@ router.get('/orders',           labCtrl.getLabOrders);
 router.get('/orders/:id',       labCtrl.getLabOrderById);
 
 router.post('/orders',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('encounter_id').isInt(),
   body('patient_user_id').isInt(),
   body('doctor_user_id').isInt(),
@@ -26,14 +26,14 @@ router.post('/orders',
 );
 
 router.post('/order-items/:id/result',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('result_value').notEmpty(),
   validate,
   labCtrl.enterLabResult,
 );
 
 router.patch('/order-items/:id/verify',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   labCtrl.verifyLabResult,
 );
 
@@ -41,7 +41,7 @@ router.patch('/order-items/:id/verify',
 // Lab slots
 // ---------------------------------------------------------------------------
 router.get('/slots',
-  authorize('admin', 'lab_staff', 'patient'),
+  authorize('org_admin', 'branch_admin', 'lab_staff', 'patient'),
   labStaffCtrl.getLabSlots,
 );
 
@@ -73,7 +73,7 @@ router.delete('/slots/:id',
 // Lab appointments
 // ---------------------------------------------------------------------------
 router.get('/appointments',
-  authorize('admin', 'lab_staff', 'patient'),
+  authorize('org_admin', 'branch_admin', 'lab_staff', 'patient'),
   labStaffCtrl.getLabAppointments,
 );
 
@@ -85,7 +85,7 @@ router.post('/appointments',
 );
 
 router.patch('/appointments/:id',
-  authorize('admin', 'lab_staff'),
+  authorize('org_admin', 'branch_admin', 'lab_staff'),
   body('status').optional().isIn(['pending','confirmed','completed','cancelled']),
   validate,
   labStaffCtrl.updateLabAppointment,

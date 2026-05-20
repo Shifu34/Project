@@ -13,7 +13,7 @@ router.get('/',    deptCtrl.getDepartments);
 router.get('/:id', deptCtrl.getDepartmentById);
 
 router.post('/',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('name').notEmpty().trim(),
   body('branch_id').isInt().withMessage('branch_id is required'),
   body('head_user_id').optional().isInt(),
@@ -22,7 +22,7 @@ router.post('/',
 );
 
 router.put('/:id',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('name').notEmpty().trim(),
   body('branch_id').optional().isInt(),
   body('head_user_id').optional().isInt(),

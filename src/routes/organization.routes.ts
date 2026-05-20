@@ -9,15 +9,15 @@ const router = Router();
 router.use(authenticate);
 
 // Any admin can see their own org
-router.get('/me', authorize('admin', 'super_admin'), orgCtrl.getMyOrganization);
+router.get('/me', authorize('org_admin', 'branch_admin'), orgCtrl.getMyOrganization);
 
-// Super admin only — manage all orgs
-router.get('/',    authorize('super_admin'), orgCtrl.getOrganizations);
-router.get('/:id', authorize('super_admin'), orgCtrl.getOrganizationById);
-router.get('/:id/stats', authorize('super_admin'), orgCtrl.getOrganizationStats);
+// App admin only — manage all orgs
+router.get('/',    authorize('app_admin'), orgCtrl.getOrganizations);
+router.get('/:id', authorize('app_admin'), orgCtrl.getOrganizationById);
+router.get('/:id/stats', authorize('app_admin', 'org_admin'), orgCtrl.getOrganizationStats);
 
 router.post('/',
-  authorize('super_admin'),
+  authorize('app_admin'),
   body('name').notEmpty().trim(),
   body('admin_first_name').notEmpty().trim(),
   body('admin_last_name').notEmpty().trim(),
@@ -27,7 +27,7 @@ router.post('/',
 );
 
 router.put('/:id',
-  authorize('super_admin'),
+  authorize('app_admin'),
   validate,
   orgCtrl.updateOrganization,
 );

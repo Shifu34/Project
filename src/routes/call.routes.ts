@@ -10,7 +10,7 @@ const router = Router();
 router.use(authenticate);
 
 // Update room enabled/disabled status
-router.patch('/room/:appointment_id/status', authorize('admin', 'doctor'), callCtrl.updateRoomStatus);
+router.patch('/room/:appointment_id/status', authorize('org_admin', 'branch_admin', 'doctor'), callCtrl.updateRoomStatus);
 
 
 // ── AI Notes (real-time, doctor-only) ────────────────────────────────────────
@@ -27,7 +27,7 @@ router.post(
   validate,
   notesCtrl.createCallNote,
 );
-router.get('/notes',    authorize('admin', 'doctor'), notesCtrl.getCallNotes);
-router.get('/notes/:id', authorize('admin', 'doctor'), notesCtrl.getCallNoteById);
+router.get('/notes',    authorize('org_admin', 'branch_admin', 'doctor'), notesCtrl.getCallNotes);
+router.get('/notes/:id', authorize('org_admin', 'branch_admin', 'doctor'), notesCtrl.getCallNoteById);
 
 export default router;

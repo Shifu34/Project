@@ -3,13 +3,15 @@
 export interface AuthPayload {
   userId: number;
   roleId: number;
-  roleName: string;   // 'super_admin' | 'admin' | 'doctor' | 'patient'
+  roleName: string;   // 'app_admin' | 'org_admin' | 'branch_admin' | 'doctor' | 'patient'
   email: string;
   patientId?: number;
   patientUserId?: number;
   doctorId?: number;
   doctorUserId?: number;
   doctorBranchId?: number;
+  organizationId?: number;  // set for org_admin and branch_admin
+  branchId?: number;        // set for branch_admin
 }
 
 export interface PaginationQuery {
@@ -54,7 +56,7 @@ export interface Organization {
 
 export interface Role {
   id: number;
-  name: 'admin' | 'doctor' | 'patient';
+  name: 'app_admin' | 'org_admin' | 'branch_admin' | 'doctor' | 'patient';
   description?: string;
   created_at: Date;
 }

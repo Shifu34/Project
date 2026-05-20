@@ -13,21 +13,21 @@ router.get('/inventory/low-stock', pharmCtrl.getLowStockAlerts);
 router.get('/transactions',        pharmCtrl.getTransactions);
 
 router.post('/inventory',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('name').notEmpty(),
   validate,
   pharmCtrl.addInventory,
 );
 
 router.post('/inventory/:id/stock-in',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('quantity').isInt({ min: 1 }),
   validate,
   pharmCtrl.restockInventory,
 );
 
 router.post('/dispense',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('prescription_item_id').isInt(),
   body('inventory_item_id').isInt(),
   body('quantity_dispensed').isInt({ min: 1 }),
@@ -42,7 +42,7 @@ router.get('/orders',  pharmCtrl.getInventoryOrders);
 router.get('/revenue', pharmCtrl.getInventoryRevenue);
 
 router.post('/orders',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('patient_user_id').isInt().withMessage('patient_user_id is required'),
   body('inventory_item_id').isInt().withMessage('inventory_item_id is required'),
   body('quantity').isInt({ min: 1 }).withMessage('quantity must be a positive integer'),
@@ -52,7 +52,7 @@ router.post('/orders',
 );
 
 router.patch('/orders/:id',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('status').optional().isIn(['pending','completed','cancelled']),
   validate,
   pharmCtrl.updateInventoryOrder,

@@ -29,7 +29,7 @@ router.post(
 router.get(
   '/notes',
   authenticate,
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   getCallNotes,
 );
 
@@ -37,7 +37,7 @@ router.get(
 router.get(
   '/notes/:id',
   authenticate,
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   getCallNoteById,
 );
 

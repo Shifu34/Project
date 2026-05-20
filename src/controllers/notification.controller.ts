@@ -78,7 +78,7 @@ export const getFcmTokens = async (req: AuthRequest, res: Response, next: NextFu
     const { userId, roleName } = req.user!;
 
     let targetUserId = userId;
-    if ((roleName === 'admin' || roleName === 'super_admin') && req.query.user_id) {
+    if ((roleName === 'org_admin' || roleName === 'branch_admin' || roleName === 'app_admin') && req.query.user_id) {
       targetUserId = Number(req.query.user_id);
     }
 
@@ -143,7 +143,7 @@ export const getNotifications = async (req: AuthRequest, res: Response, next: Ne
     const { userId, roleName } = req.user!;
 
     let targetUserId = userId;
-    if ((roleName === 'admin' || roleName === 'super_admin') && req.query.user_id) {
+    if ((roleName === 'org_admin' || roleName === 'branch_admin' || roleName === 'app_admin') && req.query.user_id) {
       targetUserId = Number(req.query.user_id);
     }
 
@@ -211,7 +211,7 @@ export const updateNotification = async (req: AuthRequest, res: Response, next: 
     if (is_read === true && !resolvedReadAt) resolvedReadAt = new Date().toISOString();
     if (is_read === false) resolvedReadAt = null;
 
-    const isAdmin = roleName === 'admin' || roleName === 'super_admin';
+    const isAdmin = roleName === 'org_admin' || roleName === 'branch_admin' || roleName === 'app_admin';
     const ownerClause = isAdmin ? '' : 'AND user_id = $7';
     const params: unknown[] = [
       title   ?? null,

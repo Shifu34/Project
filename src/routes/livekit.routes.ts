@@ -6,6 +6,6 @@ const router = Router();
 
 router.use(authenticate);
 
-router.post('/token', authorize('patient', 'doctor', 'admin', 'lab_staff'), livekitCtrl.generateToken);
+router.post('/token', authorize('patient', 'doctor', 'org_admin', 'branch_admin', 'lab_staff'), livekitCtrl.generateToken);
 
 export default router;

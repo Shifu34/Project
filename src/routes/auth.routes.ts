@@ -86,7 +86,7 @@ router.post('/verify-registration-code',
 // Admin registers a lab staff member
 router.post('/register-lab-staff',
   authenticate,
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('name').notEmpty().trim().withMessage('name is required'),
   body('branch_id').isInt().withMessage('branch_id is required'),
   body('email').isEmail().withMessage('A valid email is required'),

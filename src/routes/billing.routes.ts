@@ -27,7 +27,7 @@ router.post('/pay',
 );
 
 router.post('/refunds',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('payment_id').isInt(),
   body('amount').isFloat({ min: 0.01 }),
   validate,

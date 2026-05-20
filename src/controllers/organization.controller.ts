@@ -90,7 +90,7 @@ export const createOrganization = async (req: Request, res: Response, next: Next
     const hash = await bcrypt.hash(admin_password || 'Admin@12345', 12);
     const userRes = await client.query(
       `INSERT INTO users (role_id, first_name, last_name, email, password_hash, is_active, created_at, updated_at)
-       VALUES ((SELECT id FROM roles WHERE name='admin'), $1, $2, $3, $4, true, NOW(), NOW())
+       VALUES ((SELECT id FROM roles WHERE name='org_admin'), $1, $2, $3, $4, true, NOW(), NOW())
        RETURNING id, email, first_name, last_name`,
       [admin_first_name, admin_last_name, admin_email, hash],
     );
@@ -201,21 +201,32 @@ export const getOrganizationStats = async (req: Request, res: Response, next: Ne
   }
 };
 
-// GET /organizations/me  — org admin sees their own org
+// GET /organizations/me  — org/branch admin sees their own org
 export const getMyOrganization = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const branchId = Number((req.query.branch_id as string) || '');
-    if (!branchId) {
-      res.status(400).json({ success: false, message: 'branch_id query param is required' });
-      return;
+    // Prefer organization_id from JWT (set for org_admin / branch_admin)
+    const authReq = req as import('../middleware/auth.middleware').AuthRequest;
+    const orgIdFromJwt = authReq.user?.organizationId;
+
+    let result;
+    if (orgIdFromJwt) {
+      result = await query(
+        `SELECT o.* FROM organizations o WHERE o.id = $1`,
+        [orgIdFromJwt],
+      );
+    } else {
+      // Fallback: derive from a branch_id query param (legacy support)
+      const branchId = Number((req.query.branch_id as string) || '');
+      if (!branchId) {
+        res.status(400).json({ success: false, message: 'Could not determine organization from token. Provide branch_id query param.' });
+        return;
+      }
+      result = await query(
+        `SELECT o.* FROM organizations o JOIN branches b ON b.organization_id = o.id WHERE b.id = $1`,
+        [branchId],
+      );
     }
-    const result = await query(
-      `SELECT o.*
-       FROM organizations o
-       JOIN branches b ON b.organization_id = o.id
-       WHERE b.id = $1`,
-      [branchId],
-    );
+
     if (result.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Organization not found' });
       return;

@@ -52,7 +52,7 @@ const getDoctorUserId = async (employeeId: number, branchId: number): Promise<nu
 
 const canDoctorManageProfile = async (req: AuthRequest, doctorId: number, doctorBranchId: number): Promise<boolean> => {
   if (!req.user) return false;
-  if (req.user.roleName === 'admin') return true;
+  if (req.user.roleName === 'org_admin' || req.user.roleName === 'branch_admin') return true;
   if (req.user.roleName !== 'doctor') return false;
 
   const ownDoctor = await query(
@@ -1162,7 +1162,7 @@ export const updateDoctorSchedule = async (req: AuthRequest, res: Response, next
       res.status(404).json({ success: false, message: 'Schedule not found' });
       return;
     }
-    const isAdmin = req.user?.roleName === 'admin' || req.user?.roleName === 'super_admin';
+    const isAdmin = req.user?.roleName === 'org_admin' || req.user?.roleName === 'branch_admin' || req.user?.roleName === 'app_admin';
     if (!isAdmin && req.user?.userId !== doctorUserId) {
       res.status(403).json({ success: false, message: 'You can only update your own schedule' });
       return;
@@ -1238,7 +1238,7 @@ export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next
       res.status(404).json({ success: false, message: 'Schedule not found' });
       return;
     }
-    const isAdmin = req.user?.roleName === 'admin' || req.user?.roleName === 'super_admin';
+    const isAdmin = req.user?.roleName === 'org_admin' || req.user?.roleName === 'branch_admin' || req.user?.roleName === 'app_admin';
     if (!isAdmin && req.user?.userId !== doctorUserId) {
       res.status(403).json({ success: false, message: 'You can only delete your own schedule' });
       return;

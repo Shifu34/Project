@@ -151,6 +151,18 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       }
     }
 
+    // Fetch organization_id / branch_id for org_admin and branch_admin
+    let adminOrgId: number | null = null;
+    let adminBranchId: number | null = null;
+    if (user.role_name === 'org_admin' || user.role_name === 'branch_admin') {
+      const adminCtx = await query(
+        `SELECT organization_id, branch_id FROM users WHERE id = $1 LIMIT 1`,
+        [user.id],
+      );
+      adminOrgId    = adminCtx.rows[0]?.organization_id ?? null;
+      adminBranchId = adminCtx.rows[0]?.branch_id       ?? null;
+    }
+
     const payload: AuthPayload = {
       userId: user.id,
       roleId: user.role_id,
@@ -161,6 +173,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       ...(user.role_name === 'doctor' && { doctorUserId: user.id }),
       ...(doctorId !== null && { doctorId }),
       ...(doctorBranchId !== null && { doctorBranchId }),
+      ...(adminOrgId !== null && { organizationId: adminOrgId }),
+      ...(adminBranchId !== null && { branchId: adminBranchId }),
     };
     const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
     const refreshToken = jwt.sign(payload, env.jwtRefreshSecret, { expiresIn: env.jwtRefreshExpiresIn } as jwt.SignOptions);
@@ -183,6 +197,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           date_of_birth: patientData.date_of_birth ?? null,
           ...(doctorId !== null && { doctor_id: doctorId, doctor_branch_id: doctorBranchId }),
           ...(patientData.id !== undefined && { patient_id: patientData.id }),
+          ...(adminOrgId !== null && { organization_id: adminOrgId }),
+          ...(adminBranchId !== null && { branch_id: adminBranchId }),
         },
       },
     });

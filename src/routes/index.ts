@@ -97,7 +97,7 @@ router.post('/add-payment',
 );
 router.post('/create-call-room',
 	authenticate,
-	authorize('admin', 'doctor', 'patient'),
+	authorize('org_admin', 'branch_admin', 'doctor', 'patient'),
 	body('appointment_id').isInt(),
 	validate,
 	callCtrl.createCallRoom,
@@ -112,18 +112,18 @@ router.post('/call-token',
 	validate,
 	callCtrl.generateToken,
 );
-router.get('/call-rooms', authenticate, authorize('admin'), callCtrl.listRooms);
+router.get('/call-rooms', authenticate, authorize('org_admin', 'branch_admin'), callCtrl.listRooms);
 router.get('/my-appointments', authenticate, apptCtrl.getMyAppointments);
 router.get('/upcoming-appointment', authenticate, apptCtrl.getUpcomingAppointment);
 router.get('/appointment-encounter', authenticate, apptCtrl.getAppointmentEncounter);
 router.post('/save-appointment-encounter',
 	authenticate,
-	authorize('admin', 'doctor'),
+	authorize('org_admin', 'branch_admin', 'doctor'),
 	apptCtrl.saveAppointmentEncounter,
 );
 router.put('/update-appointment-encounter',
 	authenticate,
-	authorize('admin', 'doctor'),
+	authorize('org_admin', 'branch_admin', 'doctor'),
 	apptCtrl.updateAppointmentEncounter,
 );
 router.post('/appointment-smart',
@@ -134,7 +134,7 @@ router.post('/appointment-smart',
 );
 router.post('/create-appointment',
 	authenticate,
-	authorize('admin', 'doctor', 'patient'),
+	authorize('org_admin', 'branch_admin', 'doctor', 'patient'),
 	body('appointment_date').isISO8601(),
 	body('appointment_time').matches(/^\d{2}:\d{2}$/),
 	body('patient_user_id').optional().isInt(),
@@ -147,12 +147,12 @@ router.post('/create-appointment',
 );
 router.patch('/cancel-appointment',
 	authenticate,
-	authorize('admin', 'doctor', 'patient'),
+	authorize('org_admin', 'branch_admin', 'doctor', 'patient'),
 	apptCtrl.cancelAppointment,
 );
 router.patch('/update-appointment',
 	authenticate,
-	authorize('admin', 'doctor', 'patient'),
+	authorize('org_admin', 'branch_admin', 'doctor', 'patient'),
 	apptCtrl.patchAppointment,
 );
 router.get('/patient-medical-history', authenticate, patientCtrl.getPatientMedicalHistory);
@@ -163,13 +163,13 @@ router.get('/patient-prescriptions', authenticate, patientCtrl.getPatientPrescri
 router.get('/patient-reports', authenticate, reportCtrl.getReports);
 router.get('/encounter-full', authenticate, visitCtrl.getEncounterFull);
 router.get('/doctor-profile', authenticate, getDoctorProfile);
-router.post('/update-doctor-profile', authenticate, authorize('admin', 'doctor'), upsertDoctorProfileByDoctor);
+router.post('/update-doctor-profile', authenticate, authorize('org_admin', 'branch_admin', 'doctor'), upsertDoctorProfileByDoctor);
 router.get('/doctor-schedule', authenticate, getDoctorScheduleByDate);
 router.get('/doctor-available-slots', authenticate, getDoctorAvailableSlots);
 router.get('/doctor-booked-appointments', authenticate, getDoctorBookedAppointments);
-router.post('/add-doctor-schedule', authenticate, authorize('admin', 'doctor'), addDoctorSchedule);
-router.patch('/update-doctor-schedule', authenticate, authorize('admin', 'doctor'), updateDoctorSchedule);
-router.delete('/delete-doctor-schedule', authenticate, authorize('admin', 'doctor'), deleteDoctorSchedule);
+router.post('/add-doctor-schedule', authenticate, authorize('org_admin', 'branch_admin', 'doctor'), addDoctorSchedule);
+router.patch('/update-doctor-schedule', authenticate, authorize('org_admin', 'branch_admin', 'doctor'), updateDoctorSchedule);
+router.delete('/delete-doctor-schedule', authenticate, authorize('org_admin', 'branch_admin', 'doctor'), deleteDoctorSchedule);
 router.get('/dashboard',     authenticate, getDashboardStats);
 
 export default router;

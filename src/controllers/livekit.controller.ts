@@ -18,7 +18,7 @@ export const generateToken = async (req: AuthRequest, res: Response, next: NextF
     const appointmentId = req.body?.appointment_id ? Number(req.body.appointment_id) : null;
 
     const isDoctor   = roleName === 'doctor';
-    const isAdmin    = roleName === 'admin' || roleName === 'super_admin';
+    const isAdmin    = roleName === 'org_admin' || roleName === 'branch_admin' || roleName === 'app_admin';
     const isLabStaff = roleName === 'lab_staff';
 
     let identity: string;

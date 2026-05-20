@@ -19,7 +19,7 @@ router.get('/:id', doctorCtrl.getDoctorById);
 router.get('/:id/appointments', doctorCtrl.getDoctorAppointments);
 
 router.post('/',
-  authorize('admin'),
+  authorize('org_admin', 'branch_admin'),
   body('first_name').notEmpty().trim(),
   body('last_name').notEmpty().trim(),
   body('email').isEmail().normalizeEmail(),
@@ -27,6 +27,6 @@ router.post('/',
   doctorCtrl.createDoctor,
 );
 
-router.put('/:id', authorize('admin', 'doctor'), validate, doctorCtrl.updateDoctor);
+router.put('/:id', authorize('org_admin', 'branch_admin', 'doctor'), validate, doctorCtrl.updateDoctor);
 
 export default router;

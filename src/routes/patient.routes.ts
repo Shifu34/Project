@@ -18,7 +18,7 @@ router.get('/:id/appointments',      patientCtrl.getPatientAppointments);
 router.get('/:id/visits',            patientCtrl.getPatientVisits);
 
 router.post('/',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('first_name').notEmpty().trim(),
   body('last_name').notEmpty().trim(),
   body('email').isEmail().normalizeEmail(),
@@ -30,7 +30,7 @@ router.post('/',
 );
 
 router.put('/:id',
-  authorize('admin', 'doctor'),
+  authorize('org_admin', 'branch_admin', 'doctor'),
   body('first_name').notEmpty().trim(),
   body('last_name').notEmpty().trim(),
   body('phone').notEmpty(),
@@ -38,6 +38,6 @@ router.put('/:id',
   patientCtrl.updatePatient,
 );
 
-router.delete('/:id', authorize('admin'), patientCtrl.deletePatient);
+router.delete('/:id', authorize('org_admin', 'branch_admin'), patientCtrl.deletePatient);
 
 export default router;

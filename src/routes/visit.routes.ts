@@ -21,7 +21,7 @@ router.post('/',
   visitCtrl.createVisit,
 );
 
-router.put('/:id', authorize('admin', 'doctor'), validate, visitCtrl.updateVisit);
+router.put('/:id', authorize('org_admin', 'branch_admin', 'doctor'), validate, visitCtrl.updateVisit);
 
 router.post('/:id/vitals',
   authorize('admin', 'doctor'),
