@@ -1,6 +1,13 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
+
+const getNotificationIdFromRequest = (req: Request): number | null => {
+  const raw = (req.query.notification_id ?? req.body.notification_id ?? req.params.id) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 
 // ---------------------------------------------------------------------------
 // POST /notifications/fcm-token
