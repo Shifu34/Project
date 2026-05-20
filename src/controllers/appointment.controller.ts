@@ -654,10 +654,16 @@ export const getNatureOfVisits = async (_req: Request, res: Response, next: Next
 // ─────────────────────────────────────────────────────────────
 export const getAppointmentEncounter = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const appointmentId = req.params.id;
+    const appointmentId = getAppointmentIdFromRequest(req);
+    if (!appointmentId) {
+      res.status(400).json({ success: false, message: 'appointment_id is required' });
+      return;
+    }
 
     const encRes = await query(
       `SELECT e.*,
+              p.id AS patient_id,
+              d.employee_id AS doctor_id,
               COALESCE(d.first_name || ' ' || d.last_name,
                        u.first_name || ' ' || u.last_name) AS doctor_name,
               d.specialization,
@@ -806,7 +812,12 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
   try {
     await client.query('BEGIN');
 
-    const appointmentId = req.params.id;
+    const appointmentId = getAppointmentIdFromRequest(req);
+    if (!appointmentId) {
+      res.status(400).json({ success: false, message: 'appointment_id is required' });
+      await client.query('ROLLBACK');
+      return;
+    }
     const userId = req.user?.userId;
 
     // Resolve appointment → patient_user_id, doctor_user_id, doctor_branch_id
@@ -962,7 +973,16 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
     }
 
     await client.query('COMMIT');
-    res.status(201).json({ success: true, data: { encounter_id: encounterId } });
+    res.status(201).json({
+      success: true,
+      data: {
+        encounter_id: encounterId,
+        appointment_id: appointmentId,
+        patient_user_id,
+        doctor_user_id,
+        doctor_branch_id,
+      },
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);
@@ -997,11 +1017,17 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
   try {
     await client.query('BEGIN');
 
-    const appointmentId = req.params.id;
+    const appointmentId = getAppointmentIdFromRequest(req);
+    if (!appointmentId) {
+      res.status(400).json({ success: false, message: 'appointment_id is required' });
+      await client.query('ROLLBACK');
+      return;
+    }
     const userId = req.user?.userId;
 
     const encRes = await client.query(
-      `SELECT id, patient_user_id, doctor_user_id FROM encounters WHERE appointment_id = $1`,
+      `SELECT id, patient_user_id, doctor_user_id, doctor_branch_id
+       FROM encounters WHERE appointment_id = $1`,
       [appointmentId],
     );
     if (encRes.rows.length === 0) {
@@ -1009,7 +1035,7 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
       await client.query('ROLLBACK');
       return;
     }
-    const { id: encounterId, patient_user_id, doctor_user_id } = encRes.rows[0];
+    const { id: encounterId, patient_user_id, doctor_user_id, doctor_branch_id } = encRes.rows[0];
 
     const {
       encounter,
@@ -1207,7 +1233,17 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
     }
 
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Encounter updated successfully' });
+    res.json({
+      success: true,
+      message: 'Encounter updated successfully',
+      data: {
+        encounter_id: encounterId,
+        appointment_id: appointmentId,
+        patient_user_id,
+        doctor_user_id,
+        doctor_branch_id,
+      },
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);

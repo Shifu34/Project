@@ -125,7 +125,9 @@ export const getReports = async (req: Request, res: Response, next: NextFunction
     const [dataRes, countRes] = await Promise.all([
       query(
         `SELECT mr.id, mr.report_type, mr.title, mr.summary, mr.report_date, mr.status,
-                mr.encounter_id, mr.lab_order_id, mr.radiology_order_id,
+          mr.encounter_id, mr.lab_order_id, mr.radiology_order_id,
+          mr.patient_user_id, mr.doctor_user_id,
+          d.employee_id AS doctor_id,
                 CONCAT(p.first_name,' ',p.last_name) AS patient_name, p.patient_code,
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 (SELECT COUNT(*) FROM report_files rf WHERE rf.report_id = mr.id) AS file_count

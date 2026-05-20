@@ -22,6 +22,9 @@ import * as apptCtrl from '../controllers/appointment.controller';
 import * as callCtrl from '../controllers/call.controller';
 import * as notifCtrl from '../controllers/notification.controller';
 import * as billingCtrl from '../controllers/billing.controller';
+import * as patientCtrl from '../controllers/patient.controller';
+import * as visitCtrl from '../controllers/visit.controller';
+import * as reportCtrl from '../controllers/report.controller';
 import { getDashboardStats } from '../controllers/dashboard.controller';
 import {
 	addDoctorSchedule,
@@ -112,6 +115,23 @@ router.post('/call-token',
 router.get('/call-rooms', authenticate, authorize('admin'), callCtrl.listRooms);
 router.get('/my-appointments', authenticate, apptCtrl.getMyAppointments);
 router.get('/upcoming-appointment', authenticate, apptCtrl.getUpcomingAppointment);
+router.get('/appointment-encounter', authenticate, apptCtrl.getAppointmentEncounter);
+router.post('/save-appointment-encounter',
+	authenticate,
+	authorize('admin', 'doctor'),
+	apptCtrl.saveAppointmentEncounter,
+);
+router.put('/update-appointment-encounter',
+	authenticate,
+	authorize('admin', 'doctor'),
+	apptCtrl.updateAppointmentEncounter,
+);
+router.post('/appointment-smart',
+	authenticate,
+	body('appointment_id').optional().isInt(),
+	validate,
+	visitCtrl.postAppointmentSmart,
+);
 router.post('/create-appointment',
 	authenticate,
 	authorize('admin', 'doctor', 'patient'),
@@ -135,6 +155,13 @@ router.patch('/update-appointment',
 	authorize('admin', 'doctor', 'patient'),
 	apptCtrl.patchAppointment,
 );
+router.get('/patient-medical-history', authenticate, patientCtrl.getPatientMedicalHistory);
+router.get('/patient-encounters', authenticate, patientCtrl.getPatientEncounters);
+router.get('/patient-lab-orders', authenticate, patientCtrl.getPatientLabOrders);
+router.get('/patient-radiology-orders', authenticate, patientCtrl.getPatientRadiologyOrders);
+router.get('/patient-prescriptions', authenticate, patientCtrl.getPatientPrescriptions);
+router.get('/patient-reports', authenticate, reportCtrl.getReports);
+router.get('/encounter-full', authenticate, visitCtrl.getEncounterFull);
 router.get('/doctor-profile', authenticate, getDoctorProfile);
 router.post('/update-doctor-profile', authenticate, authorize('admin', 'doctor'), upsertDoctorProfileByDoctor);
 router.get('/doctor-schedule', authenticate, getDoctorScheduleByDate);

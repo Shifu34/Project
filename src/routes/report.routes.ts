@@ -6,7 +6,6 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/',    reportCtrl.getReports);
 router.get('/:id', reportCtrl.getReportById);
 router.post('/:id/summarize', reportCtrl.summarizeReport);
 

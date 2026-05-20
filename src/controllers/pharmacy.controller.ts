@@ -7,8 +7,21 @@ export const getInventory = async (req: Request, res: Response, next: NextFuncti
     const page   = Math.max(1, parseInt(req.query.page  as string || '1',  10));
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const search = (req.query.search as string || '').trim();
-    const branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
+    const appointmentId = req.query.appointment_id ? Number(req.query.appointment_id) : null;
+    let branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
     const offset = (page - 1) * limit;
+
+    if (appointmentId) {
+      const apptRes = await query(
+        `SELECT doctor_branch_id FROM appointments WHERE id = $1`,
+        [appointmentId],
+      );
+      if (apptRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Appointment not found' });
+        return;
+      }
+      branchId = apptRes.rows[0].doctor_branch_id as number;
+    }
 
     const conditions: string[] = [];
     const filterParams: unknown[] = [];

@@ -4,28 +4,68 @@ import { query, getClient } from '../config/database';
 // GET /lab/tests?search=&branch_id=
 export const getLabTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const search = (req.query.search as string || '').trim();
-    const branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
+    const page      = Math.max(1, parseInt(req.query.page as string || '1', 10));
+    const limit     = Math.min(100, parseInt(req.query.limit as string || '50', 10));
+    const offset    = (page - 1) * limit;
+    const searchRaw = (req.query.search as string | undefined) ?? '';
+    const search    = searchRaw && searchRaw !== 'null' ? searchRaw.trim() : '';
+    const appointmentId = req.query.appointment_id ? Number(req.query.appointment_id) : null;
+    let branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
 
-    const params: unknown[] = [];
+    if (appointmentId) {
+      const apptRes = await query(
+        `SELECT doctor_branch_id FROM appointments WHERE id = $1`,
+        [appointmentId],
+      );
+      if (apptRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Appointment not found' });
+        return;
+      }
+      branchId = apptRes.rows[0].doctor_branch_id as number;
+    }
+
+    const params: unknown[] = [limit, offset];
+    const countParams: unknown[] = [];
     const conditions: string[] = ['is_active = TRUE'];
+    const countConditions: string[] = ['is_active = TRUE'];
+    let idx = 3;
+    let countIdx = 1;
 
     if (search) {
       params.push(`%${search}%`);
-      conditions.push(`(name ILIKE $${params.length} OR code ILIKE $${params.length} OR category ILIKE $${params.length} OR description ILIKE $${params.length})`);
+      countParams.push(`%${search}%`);
+      conditions.push(`(name ILIKE $${idx} OR code ILIKE $${idx} OR category ILIKE $${idx} OR description ILIKE $${idx})`);
+      countConditions.push(`(name ILIKE $${countIdx} OR code ILIKE $${countIdx} OR category ILIKE $${countIdx} OR description ILIKE $${countIdx})`);
+      idx++;
+      countIdx++;
     }
     if (branchId !== null) {
       params.push(branchId);
-      conditions.push(`branch_id = $${params.length}`);
+      countParams.push(branchId);
+      conditions.push(`branch_id = $${idx++}`);
+      countConditions.push(`branch_id = $${countIdx++}`);
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
+    const countWhere = `WHERE ${countConditions.join(' AND ')}`;
 
-    const result = await query(
-      `SELECT * FROM lab_test_catalog ${where} ORDER BY category, name`,
-      params,
-    );
-    res.json({ success: true, data: result.rows });
+    const [dataRes, countRes] = await Promise.all([
+      query(
+        `SELECT * FROM lab_test_catalog ${where} ORDER BY category, name LIMIT $1 OFFSET $2`,
+        params,
+      ),
+      query(
+        `SELECT COUNT(*) FROM lab_test_catalog ${countWhere}`,
+        countParams,
+      ),
+    ]);
+
+    const total = parseInt(countRes.rows[0].count, 10);
+    res.json({
+      success: true,
+      data: dataRes.rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     next(err);
   }
@@ -34,28 +74,68 @@ export const getLabTests = async (req: Request, res: Response, next: NextFunctio
 // GET /lab/radiology-tests?search=&branch_id=
 export const getRadiologyTests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const search = (req.query.search as string || '').trim();
-    const branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
+    const page      = Math.max(1, parseInt(req.query.page as string || '1', 10));
+    const limit     = Math.min(100, parseInt(req.query.limit as string || '50', 10));
+    const offset    = (page - 1) * limit;
+    const searchRaw = (req.query.search as string | undefined) ?? '';
+    const search    = searchRaw && searchRaw !== 'null' ? searchRaw.trim() : '';
+    const appointmentId = req.query.appointment_id ? Number(req.query.appointment_id) : null;
+    let branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
 
-    const params: unknown[] = [];
+    if (appointmentId) {
+      const apptRes = await query(
+        `SELECT doctor_branch_id FROM appointments WHERE id = $1`,
+        [appointmentId],
+      );
+      if (apptRes.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Appointment not found' });
+        return;
+      }
+      branchId = apptRes.rows[0].doctor_branch_id as number;
+    }
+
+    const params: unknown[] = [limit, offset];
+    const countParams: unknown[] = [];
     const conditions: string[] = ['is_active = TRUE'];
+    const countConditions: string[] = ['is_active = TRUE'];
+    let idx = 3;
+    let countIdx = 1;
 
     if (search) {
       params.push(`%${search}%`);
-      conditions.push(`(name ILIKE $${params.length} OR code ILIKE $${params.length} OR modality ILIKE $${params.length} OR description ILIKE $${params.length})`);
+      countParams.push(`%${search}%`);
+      conditions.push(`(name ILIKE $${idx} OR code ILIKE $${idx} OR modality ILIKE $${idx} OR description ILIKE $${idx})`);
+      countConditions.push(`(name ILIKE $${countIdx} OR code ILIKE $${countIdx} OR modality ILIKE $${countIdx} OR description ILIKE $${countIdx})`);
+      idx++;
+      countIdx++;
     }
     if (branchId !== null) {
       params.push(branchId);
-      conditions.push(`branch_id = $${params.length}`);
+      countParams.push(branchId);
+      conditions.push(`branch_id = $${idx++}`);
+      countConditions.push(`branch_id = $${countIdx++}`);
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
+    const countWhere = `WHERE ${countConditions.join(' AND ')}`;
 
-    const result = await query(
-      `SELECT * FROM radiology_test_catalog ${where} ORDER BY modality, name`,
-      params,
-    );
-    res.json({ success: true, data: result.rows });
+    const [dataRes, countRes] = await Promise.all([
+      query(
+        `SELECT * FROM radiology_test_catalog ${where} ORDER BY modality, name LIMIT $1 OFFSET $2`,
+        params,
+      ),
+      query(
+        `SELECT COUNT(*) FROM radiology_test_catalog ${countWhere}`,
+        countParams,
+      ),
+    ]);
+
+    const total = parseInt(countRes.rows[0].count, 10);
+    res.json({
+      success: true,
+      data: dataRes.rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     next(err);
   }

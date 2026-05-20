@@ -3,6 +3,13 @@ import bcrypt from 'bcryptjs';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 
+const getPatientUserIdFromRequest = (req: Request): number | null => {
+  const raw = (req.query.patient_user_id ?? req.body.patient_user_id ?? req.params.id) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 // GET /patients  – paginated list
 export const getPatients = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -411,7 +418,11 @@ export const getPatientVisits = async (req: Request, res: Response, next: NextFu
 // GET /patients/:id/medical-history
 export const getPatientMedicalHistory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const patientId = req.params.id;
+    const patientUserId = getPatientUserIdFromRequest(req);
+    if (!patientUserId) {
+      res.status(400).json({ success: false, message: 'patient_user_id is required' });
+      return;
+    }
 
     // 1. Patient demographics
     const patientRes = await query(
@@ -421,16 +432,14 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
               p.blood_type, p.phone, p.email, p.address,
               p.emergency_contact_name, p.emergency_contact_phone,
               p.marital_status, p.occupation, p.nationality, p.status
-       FROM patients p WHERE p.id = $1`,
-      [patientId],
+       FROM patients p WHERE p.user_id = $1`,
+      [patientUserId],
     );
 
     if (patientRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
-    const patientUserId = patientRes.rows[0].user_id as number;
-
     // 2. Insurance
     const [
       insuranceRes,
@@ -453,7 +462,8 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
 
       // Encounters (full SOAP)
       query(
-        `SELECT e.*,
+        `SELECT e.*, d.employee_id AS doctor_id,
+          d.user_id AS doctor_user_id,
                 COALESCE(d.first_name || ' ' || d.last_name,
                          u.first_name || ' ' || u.last_name) AS doctor_name,
                 d.specialization AS doctor_specialization,
@@ -469,7 +479,8 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
 
       // Diagnoses
       query(
-        `SELECT diag.*,
+        `SELECT diag.*, d.employee_id AS doctor_id,
+          d.user_id AS doctor_user_id,
                 COALESCE(d.first_name || ' ' || d.last_name,
                          u.first_name || ' ' || u.last_name) AS doctor_name
          FROM diagnoses diag
@@ -493,7 +504,8 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
 
       // Prescriptions with items
       query(
-        `SELECT p.*,
+        `SELECT p.*, d.employee_id AS doctor_id,
+          d.user_id AS doctor_user_id,
                 COALESCE(d.first_name || ' ' || d.last_name,
                          u.first_name || ' ' || u.last_name) AS doctor_name,
                 JSON_AGG(
@@ -521,8 +533,9 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
 
       // Lab orders with test results
       query(
-        `SELECT lo.*,
-                COALESCE(d.first_name || ' ' || d.last_name,
+        `SELECT lo.*, d.employee_id AS doctor_id,
+          d.user_id AS doctor_user_id,
+          COALESCE(d.first_name || ' ' || d.last_name,
                          u.first_name || ' ' || u.last_name) AS doctor_name,
                 JSON_AGG(
                   JSON_BUILD_OBJECT(
@@ -552,8 +565,9 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
 
       // Radiology orders with findings
       query(
-        `SELECT ro.*,
-                COALESCE(d.first_name || ' ' || d.last_name,
+        `SELECT ro.*, d.employee_id AS doctor_id,
+          d.user_id AS doctor_user_id,
+          COALESCE(d.first_name || ' ' || d.last_name,
                          u.first_name || ' ' || u.last_name) AS doctor_name,
                 JSON_AGG(
                   JSON_BUILD_OBJECT(
@@ -628,7 +642,11 @@ export const getPatientMedicalHistory = async (req: Request, res: Response, next
 // Paginated encounter list with patient header + insurance at the top
 export const getPatientEncounters = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const patientId = req.params.id;
+    const patientUserId = getPatientUserIdFromRequest(req);
+    if (!patientUserId) {
+      res.status(400).json({ success: false, message: 'patient_user_id is required' });
+      return;
+    }
     const page   = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const offset = (page - 1) * limit;
@@ -640,16 +658,14 @@ export const getPatientEncounters = async (req: Request, res: Response, next: Ne
               p.blood_type, p.phone, p.email, p.address,
               p.emergency_contact_name, p.emergency_contact_phone,
               p.marital_status, p.occupation, p.nationality, p.status
-       FROM patients p WHERE p.id = $1`,
-      [patientId],
+       FROM patients p WHERE p.user_id = $1`,
+      [patientUserId],
     );
 
     if (patientRes.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
-
-    const patientUserId = patientRes.rows[0].user_id as number;
 
     const insuranceRes = await query(
       `SELECT ui.*, ip.name AS provider_name, ip.contact_phone AS provider_phone
@@ -662,7 +678,8 @@ export const getPatientEncounters = async (req: Request, res: Response, next: Ne
 
     const [encountersRes, countRes] = await Promise.all([
       query(
-        `SELECT e.*,
+        `SELECT e.*, d.employee_id AS doctor_id,
+          d.user_id AS doctor_user_id,
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 d.specialization AS doctor_specialization,
                 dept.name AS department_name
@@ -720,14 +737,18 @@ export const getPatientEncounters = async (req: Request, res: Response, next: Ne
 // GET /patients/:id/lab-orders?page=&limit=&status=
 export const getPatientLabOrders = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const patientId = req.params.id;
+    const patientUserId = getPatientUserIdFromRequest(req);
+    if (!patientUserId) {
+      res.status(400).json({ success: false, message: 'patient_user_id is required' });
+      return;
+    }
     const page   = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const status = req.query.status as string | undefined;
     const offset = (page - 1) * limit;
 
-    const params: unknown[] = [limit, offset, patientId];
-    const countParams: unknown[] = [patientId];
+    const params: unknown[] = [limit, offset, patientUserId];
+    const countParams: unknown[] = [patientUserId];
     let statusClause = '';
     let countStatusClause = '';
     if (status) {
@@ -740,6 +761,8 @@ export const getPatientLabOrders = async (req: Request, res: Response, next: Nex
     const [dataRes, countRes] = await Promise.all([
       query(
         `SELECT lo.id, lo.encounter_id, lo.order_date, lo.priority, lo.status, lo.clinical_notes,
+          lo.patient_user_id, lo.doctor_user_id, lo.doctor_branch_id,
+          d.employee_id AS doctor_id,
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 d.specialization AS doctor_specialization,
                 JSON_AGG(
@@ -757,12 +780,11 @@ export const getPatientLabOrders = async (req: Request, res: Response, next: Nex
                   ) ORDER BY loi.id
                 ) FILTER (WHERE loi.id IS NOT NULL) AS tests
          FROM lab_orders lo
-         JOIN patients p ON p.user_id = lo.patient_user_id
          JOIN doctors d ON d.user_id = lo.doctor_user_id AND d.branch_id = lo.doctor_branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
          LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
-         WHERE p.id = $3 ${statusClause}
+         WHERE lo.patient_user_id = $3 ${statusClause}
          GROUP BY lo.id, u.first_name, u.last_name, d.specialization
          ORDER BY lo.order_date DESC
          LIMIT $1 OFFSET $2`,
@@ -770,8 +792,7 @@ export const getPatientLabOrders = async (req: Request, res: Response, next: Nex
       ),
       query(
         `SELECT COUNT(*) FROM lab_orders lo
-         JOIN patients p ON p.user_id = lo.patient_user_id
-         WHERE p.id = $1 ${countStatusClause}`,
+         WHERE lo.patient_user_id = $1 ${countStatusClause}`,
         countParams,
       ),
     ]);
@@ -791,14 +812,18 @@ export const getPatientLabOrders = async (req: Request, res: Response, next: Nex
 // GET /patients/:id/radiology-orders?page=&limit=&status=
 export const getPatientRadiologyOrders = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const patientId = req.params.id;
+    const patientUserId = getPatientUserIdFromRequest(req);
+    if (!patientUserId) {
+      res.status(400).json({ success: false, message: 'patient_user_id is required' });
+      return;
+    }
     const page   = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const status = req.query.status as string | undefined;
     const offset = (page - 1) * limit;
 
-    const params: unknown[] = [limit, offset, patientId];
-    const countParams: unknown[] = [patientId];
+    const params: unknown[] = [limit, offset, patientUserId];
+    const countParams: unknown[] = [patientUserId];
     let statusClause = '';
     let countStatusClause = '';
     if (status) {
@@ -811,6 +836,8 @@ export const getPatientRadiologyOrders = async (req: Request, res: Response, nex
     const [dataRes, countRes] = await Promise.all([
       query(
         `SELECT ro.id, ro.encounter_id, ro.order_date, ro.priority, ro.status, ro.clinical_notes,
+          ro.patient_user_id, ro.doctor_user_id, ro.branch_id AS doctor_branch_id,
+          d.employee_id AS doctor_id,
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 d.specialization AS doctor_specialization,
                 JSON_AGG(
@@ -827,12 +854,11 @@ export const getPatientRadiologyOrders = async (req: Request, res: Response, nex
                   ) ORDER BY roi.id
                 ) FILTER (WHERE roi.id IS NOT NULL) AS scans
          FROM radiology_orders ro
-         JOIN patients p ON p.user_id = ro.patient_user_id
          JOIN doctors d ON d.user_id = ro.doctor_user_id AND d.branch_id = ro.branch_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
          LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
-         WHERE p.id = $3 ${statusClause}
+         WHERE ro.patient_user_id = $3 ${statusClause}
          GROUP BY ro.id, u.first_name, u.last_name, d.specialization
          ORDER BY ro.order_date DESC
          LIMIT $1 OFFSET $2`,
@@ -840,8 +866,7 @@ export const getPatientRadiologyOrders = async (req: Request, res: Response, nex
       ),
       query(
         `SELECT COUNT(*) FROM radiology_orders ro
-         JOIN patients p ON p.user_id = ro.patient_user_id
-         WHERE p.id = $1 ${countStatusClause}`,
+         WHERE ro.patient_user_id = $1 ${countStatusClause}`,
         countParams,
       ),
     ]);
@@ -861,14 +886,18 @@ export const getPatientRadiologyOrders = async (req: Request, res: Response, nex
 // GET /patients/:id/prescriptions?page=&limit=&status=
 export const getPatientPrescriptions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const patientId = req.params.id;
+    const patientUserId = getPatientUserIdFromRequest(req);
+    if (!patientUserId) {
+      res.status(400).json({ success: false, message: 'patient_user_id is required' });
+      return;
+    }
     const page   = Math.max(1,   parseInt(req.query.page  as string || '1',  10));
     const limit  = Math.min(100, parseInt(req.query.limit as string || '20', 10));
     const status = req.query.status as string | undefined;
     const offset = (page - 1) * limit;
 
-    const params: unknown[] = [limit, offset, patientId];
-    const countParams: unknown[] = [patientId];
+    const params: unknown[] = [limit, offset, patientUserId];
+    const countParams: unknown[] = [patientUserId];
     let statusClause = '';
     let countStatusClause = '';
     if (status) {
@@ -881,6 +910,8 @@ export const getPatientPrescriptions = async (req: Request, res: Response, next:
     const [dataRes, countRes] = await Promise.all([
       query(
         `SELECT p.id, p.encounter_id, p.prescription_date, p.valid_until, p.status, p.notes,
+          p.patient_user_id, p.doctor_user_id,
+          d.employee_id AS doctor_id,
                 CONCAT(u.first_name,' ',u.last_name) AS doctor_name,
                 d.specialization AS doctor_specialization,
                 JSON_AGG(
@@ -897,11 +928,10 @@ export const getPatientPrescriptions = async (req: Request, res: Response, next:
                   ) ORDER BY pi.id
                 ) FILTER (WHERE pi.id IS NOT NULL) AS items
          FROM prescriptions p
-         JOIN patients pt ON pt.user_id = p.patient_user_id
          JOIN doctors d ON d.user_id = p.doctor_user_id
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
-         WHERE pt.id = $3 ${statusClause}
+         WHERE p.patient_user_id = $3 ${statusClause}
          GROUP BY p.id, u.first_name, u.last_name, d.specialization
          ORDER BY p.prescription_date DESC
          LIMIT $1 OFFSET $2`,
@@ -909,8 +939,7 @@ export const getPatientPrescriptions = async (req: Request, res: Response, next:
       ),
       query(
         `SELECT COUNT(*) FROM prescriptions p
-         JOIN patients pt ON pt.user_id = p.patient_user_id
-         WHERE pt.id = $1 ${countStatusClause}`,
+         WHERE p.patient_user_id = $1 ${countStatusClause}`,
         countParams,
       ),
     ]);

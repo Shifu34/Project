@@ -1,6 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../config/database';
 
+const getEncounterIdFromRequest = (req: Request): number | null => {
+  const raw = (req.query.encounter_id ?? req.body.encounter_id ?? req.params.id) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getAppointmentIdFromRequest = (req: Request): number | null => {
+  const raw = (req.query.appointment_id ?? req.body.appointment_id ?? req.params.id) as string | number | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 // POST /encounters  – open a clinical encounter
 export const createVisit = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -183,7 +197,11 @@ export const getEncounterVitals = async (req: Request, res: Response, next: Next
 // GET /encounters/:id/full  – complete encounter with all related data
 export const getEncounterFull = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const encounterId = req.params.id;
+    const encounterId = getEncounterIdFromRequest(req);
+    if (!encounterId) {
+      res.status(400).json({ success: false, message: 'encounter_id is required' });
+      return;
+    }
 
     const encounterRes = await query(
       `SELECT e.*,
@@ -479,5 +497,21 @@ export const getAppointmentSmart = async (req: Request, res: Response, next: Nex
   const requestedFields = ((req.query.fields as string) || '')
     .split(',').map(f => f.trim()).filter(Boolean);
   await runSmartQuery(res, next, Number(req.params.id), null, requestedFields);
+};
+
+// POST /appointment-smart { appointment_id, fields: [] | "a,b" }
+export const postAppointmentSmart = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const appointmentId = getAppointmentIdFromRequest(req);
+  if (!appointmentId) {
+    res.status(400).json({ success: false, message: 'appointment_id is required' });
+    return;
+  }
+
+  const rawFields = (req.body.fields ?? req.query.fields ?? '') as string | string[];
+  const requestedFields = Array.isArray(rawFields)
+    ? rawFields.map(f => String(f).trim()).filter(Boolean)
+    : String(rawFields).split(',').map(f => f.trim()).filter(Boolean);
+
+  await runSmartQuery(res, next, appointmentId, null, requestedFields);
 };
 
