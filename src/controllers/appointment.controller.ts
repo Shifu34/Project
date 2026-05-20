@@ -931,6 +931,15 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
     // 5. Lab orders
     if (Array.isArray(lab_orders)) {
       for (const lo of lab_orders) {
+        const validLabIds: number[] = [];
+        if (Array.isArray(lo.test_ids) && lo.test_ids.length > 0) {
+          const existing = await client.query(
+            `SELECT id FROM lab_test_catalog WHERE id = ANY($1::int[])`,
+            [lo.test_ids],
+          );
+          existing.rows.forEach((r: { id: number }) => validLabIds.push(r.id));
+        }
+        if (validLabIds.length === 0) continue;
         const loRow = await client.query(
            `INSERT INTO lab_orders
              (encounter_id, patient_user_id, doctor_user_id, doctor_branch_id, ordered_by, priority, clinical_notes)
@@ -939,13 +948,11 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
            lo.priority ?? 'routine', lo.clinical_notes ?? null],
         );
         const loId = loRow.rows[0].id;
-        if (Array.isArray(lo.test_ids)) {
-          for (const testId of lo.test_ids) {
-            await client.query(
-              `INSERT INTO lab_order_items (lab_order_id, lab_test_id) VALUES ($1,$2)`,
-              [loId, testId],
-            );
-          }
+        for (const testId of validLabIds) {
+          await client.query(
+            `INSERT INTO lab_order_items (lab_order_id, lab_test_id) VALUES ($1,$2)`,
+            [loId, testId],
+          );
         }
       }
     }
@@ -953,6 +960,15 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
     // 6. Radiology orders
     if (Array.isArray(radiology_orders)) {
       for (const ro of radiology_orders) {
+        const validRadIds: number[] = [];
+        if (Array.isArray(ro.test_ids) && ro.test_ids.length > 0) {
+          const existing = await client.query(
+            `SELECT id FROM radiology_test_catalog WHERE id = ANY($1::int[])`,
+            [ro.test_ids],
+          );
+          existing.rows.forEach((r: { id: number }) => validRadIds.push(r.id));
+        }
+        if (validRadIds.length === 0) continue;
         const roRow = await client.query(
            `INSERT INTO radiology_orders
              (encounter_id, patient_user_id, doctor_user_id, branch_id, ordered_by, priority, clinical_notes)
@@ -961,13 +977,11 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
            ro.priority ?? 'routine', ro.clinical_notes ?? null],
         );
         const roId = roRow.rows[0].id;
-        if (Array.isArray(ro.test_ids)) {
-          for (const testId of ro.test_ids) {
-            await client.query(
-              `INSERT INTO radiology_order_items (radiology_order_id, radiology_test_id) VALUES ($1,$2)`,
-              [roId, testId],
-            );
-          }
+        for (const testId of validRadIds) {
+          await client.query(
+            `INSERT INTO radiology_order_items (radiology_order_id, radiology_test_id) VALUES ($1,$2)`,
+            [roId, testId],
+          );
         }
       }
     }
@@ -1193,6 +1207,15 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
     // Create new lab orders (with test_ids)
     if (Array.isArray(lab_orders)) {
       for (const lo of lab_orders) {
+        const validLabIds: number[] = [];
+        if (Array.isArray(lo.test_ids) && lo.test_ids.length > 0) {
+          const existing = await client.query(
+            `SELECT id FROM lab_test_catalog WHERE id = ANY($1::int[])`,
+            [lo.test_ids],
+          );
+          existing.rows.forEach((r: { id: number }) => validLabIds.push(r.id));
+        }
+        if (validLabIds.length === 0) continue; // skip if no valid tests
         const loRow = await client.query(
           `INSERT INTO lab_orders
              (encounter_id, patient_user_id, doctor_user_id, doctor_branch_id, ordered_by, priority, clinical_notes)
@@ -1201,13 +1224,11 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
            lo.priority ?? 'routine', lo.clinical_notes ?? null],
         );
         const loId = loRow.rows[0].id;
-        if (Array.isArray(lo.test_ids)) {
-          for (const testId of lo.test_ids) {
-            await client.query(
-              `INSERT INTO lab_order_items (lab_order_id, lab_test_id) VALUES ($1,$2)`,
-              [loId, testId],
-            );
-          }
+        for (const testId of validLabIds) {
+          await client.query(
+            `INSERT INTO lab_order_items (lab_order_id, lab_test_id) VALUES ($1,$2)`,
+            [loId, testId],
+          );
         }
       }
     }
@@ -1215,6 +1236,15 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
     // Create new radiology orders (with test_ids)
     if (Array.isArray(radiology_orders)) {
       for (const ro of radiology_orders) {
+        const validRadIds: number[] = [];
+        if (Array.isArray(ro.test_ids) && ro.test_ids.length > 0) {
+          const existing = await client.query(
+            `SELECT id FROM radiology_test_catalog WHERE id = ANY($1::int[])`,
+            [ro.test_ids],
+          );
+          existing.rows.forEach((r: { id: number }) => validRadIds.push(r.id));
+        }
+        if (validRadIds.length === 0) continue; // skip if no valid tests
         const roRow = await client.query(
           `INSERT INTO radiology_orders
              (encounter_id, patient_user_id, doctor_user_id, branch_id, ordered_by, priority, clinical_notes)
@@ -1223,13 +1253,11 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
            ro.priority ?? 'routine', ro.clinical_notes ?? null],
         );
         const roId = roRow.rows[0].id;
-        if (Array.isArray(ro.test_ids)) {
-          for (const testId of ro.test_ids) {
-            await client.query(
-              `INSERT INTO radiology_order_items (radiology_order_id, radiology_test_id) VALUES ($1,$2)`,
-              [roId, testId],
-            );
-          }
+        for (const testId of validRadIds) {
+          await client.query(
+            `INSERT INTO radiology_order_items (radiology_order_id, radiology_test_id) VALUES ($1,$2)`,
+            [roId, testId],
+          );
         }
       }
     }
