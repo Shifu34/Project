@@ -807,6 +807,36 @@ export const getAppointmentEncounter = async (req: Request, res: Response, next:
 //   radiology_orders?: [{ priority, clinical_notes, test_ids: number[] }]
 // }
 // ─────────────────────────────────────────────────────────────
+
+/** Validate vitals field ranges and return a user-friendly error message, or null if valid. */
+function validateVitals(v: Record<string, unknown>): string | null {
+  const checks: Array<{ field: string; label: string; min: number; max: number }> = [
+    { field: 'temperature',              label: 'Temperature (°C)',             min: 30,   max: 45    },
+    { field: 'blood_pressure_systolic',  label: 'Systolic blood pressure',      min: 50,   max: 300   },
+    { field: 'blood_pressure_diastolic', label: 'Diastolic blood pressure',     min: 20,   max: 200   },
+    { field: 'heart_rate',              label: 'Heart rate (bpm)',              min: 20,   max: 350   },
+    { field: 'respiratory_rate',        label: 'Respiratory rate (breaths/min)',min: 4,    max: 80    },
+    { field: 'oxygen_saturation',       label: 'Oxygen saturation (%)',         min: 0,    max: 100   },
+    { field: 'weight',                  label: 'Weight (kg)',                   min: 0.5,  max: 700   },
+    { field: 'height',                  label: 'Height (cm)',                   min: 20,   max: 300   },
+    { field: 'bmi',                     label: 'BMI',                           min: 5,    max: 100   },
+    { field: 'blood_glucose',           label: 'Blood glucose (mg/dL)',         min: 0,    max: 3000  },
+    { field: 'pain_scale',              label: 'Pain scale',                    min: 0,    max: 10    },
+  ];
+  for (const c of checks) {
+    const val = v[c.field];
+    if (val === null || val === undefined) continue;
+    const num = Number(val);
+    if (!Number.isFinite(num)) {
+      return `${c.label} must be a number (received "${val}").`;
+    }
+    if (num < c.min || num > c.max) {
+      return `${c.label} value ${num} is out of the accepted range (${c.min}–${c.max}). Please check and re-enter.`;
+    }
+  }
+  return null;
+}
+
 export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   const client = await getClient();
   try {
@@ -840,6 +870,16 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
       lab_orders,
       radiology_orders,
     } = req.body;
+
+    // Validate vitals ranges before touching the DB
+    if (vitals) {
+      const vitalsError = validateVitals(vitals);
+      if (vitalsError) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, message: vitalsError });
+        return;
+      }
+    }
 
     // 1. Encounter
     const encRow = await client.query(
@@ -1064,6 +1104,16 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
       radiology_orders,
       radiology_order_items,
     } = req.body;
+
+    // Validate vitals ranges before touching the DB
+    if (vitals) {
+      const vitalsError = validateVitals(vitals);
+      if (vitalsError) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, message: vitalsError });
+        return;
+      }
+    }
 
     // Update encounter fields
     if (encounter) {
