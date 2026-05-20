@@ -192,7 +192,11 @@ export const getNotifications = async (req: AuthRequest, res: Response, next: Ne
 export const updateNotification = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { userId, roleName } = req.user!;
-    const notifId = Number(req.params.id);
+    const notifId = getNotificationIdFromRequest(req);
+    if (!notifId) {
+      res.status(400).json({ success: false, message: 'notification_id is required' });
+      return;
+    }
     const { title, message, type, is_read, read_at } = req.body;
 
     // Auto-set read_at when marking as read; clear it when marking unread

@@ -20,6 +20,8 @@ import organizationRoutes        from './organization.routes';
 import notificationRoutes        from './notification.routes';
 import * as apptCtrl from '../controllers/appointment.controller';
 import * as callCtrl from '../controllers/call.controller';
+import * as notifCtrl from '../controllers/notification.controller';
+import * as billingCtrl from '../controllers/billing.controller';
 import { getDashboardStats } from '../controllers/dashboard.controller';
 import {
 	addDoctorSchedule,
@@ -55,6 +57,41 @@ router.use('/ai-summaries',         aiSummaryRoutes);
 router.use('/call-transcriptions',  callTranscriptionRoutes);
 router.use('/organizations',        organizationRoutes);
 router.use('/notifications',        notificationRoutes);
+router.post('/add-fcm-token',
+	authenticate,
+	body('token').notEmpty().withMessage('token is required'),
+	body('platform').optional().isIn(['android', 'ios', 'web']).withMessage("platform must be 'android', 'ios', or 'web'"),
+	validate,
+	notifCtrl.registerFcmToken,
+);
+router.get('/fcm-tokens', authenticate, notifCtrl.getFcmTokens);
+router.delete('/deactivate-fcm-token',
+	authenticate,
+	body('token').optional().isString(),
+	body('device_id').optional().isString(),
+	validate,
+	notifCtrl.deactivateFcmToken,
+);
+router.get('/get-notifications', authenticate, notifCtrl.getNotifications);
+router.patch('/update-notification',
+	authenticate,
+	body('type').optional().isIn(['appointment','lab_result','prescription','billing','system','alert']),
+	body('is_read').optional().isBoolean(),
+	validate,
+	notifCtrl.updateNotification,
+);
+router.get('/my-payments', authenticate, authorize('patient'), billingCtrl.getMyPayments);
+router.post('/add-payment',
+	authenticate,
+	authorize('patient'),
+	body('amount').isFloat({ min: 0.01 }),
+	body('payment_method').optional().isIn(['cash','credit_card','debit_card','insurance','bank_transfer','cheque','online']),
+	body('payment_status').optional().isIn(['completed','pending','failed','refunded']),
+	body('paid_at').optional().isISO8601(),
+	body('patient_user_id').optional().isInt(),
+	validate,
+	billingCtrl.recordPayment,
+);
 router.post('/create-call-room',
 	authenticate,
 	authorize('admin', 'doctor', 'patient'),

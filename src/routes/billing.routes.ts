@@ -9,7 +9,6 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/summary',      billingCtrl.getBillingSummary);
-router.get('/my-payments',  authorize('patient'), billingCtrl.getMyPayments);
 router.get('/payments',     billingCtrl.getPayments);
 router.get('/payments/:id', billingCtrl.getPaymentById);
 
@@ -17,15 +16,6 @@ router.get('/payments/:id', billingCtrl.getPaymentById);
 router.get('/bills',        billingCtrl.getPayments);
 router.get('/bills/:id',    billingCtrl.getPaymentById);
 
-router.post('/payments',
-  authorize('patient'),
-  body('amount').isFloat({ min: 0.01 }),
-  body('payment_method').optional().isIn(['cash','credit_card','debit_card','insurance','bank_transfer','cheque','online']),
-  body('payment_status').optional().isIn(['completed','pending','failed','refunded']),
-  body('paid_at').optional().isISO8601(),
-  validate,
-  billingCtrl.recordPayment,
-);
 
 // Demo payment endpoint
 router.post('/pay',

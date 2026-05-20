@@ -159,8 +159,9 @@ export const recordPayment = async (req: AuthRequest, res: Response, next: NextF
 
     // Accept explicit patient_user_id from body, otherwise resolve from token
     let patientUserId: number;
-    if (req.body.patient_user_id) {
-      patientUserId = parseInt(req.body.patient_user_id, 10);
+    if (req.body.patient_user_id ?? req.query.patient_user_id) {
+      const raw = (req.body.patient_user_id ?? req.query.patient_user_id) as string | number;
+      patientUserId = parseInt(String(raw), 10);
     } else {
       const patRes = await query(`SELECT user_id FROM patients WHERE user_id = $1 LIMIT 1`, [req.user!.userId]);
       if (patRes.rows.length === 0) {
