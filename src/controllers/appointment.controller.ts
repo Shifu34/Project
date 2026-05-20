@@ -1026,8 +1026,10 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
     const userId = req.user?.userId;
 
     const encRes = await client.query(
-      `SELECT id, patient_user_id, doctor_user_id, doctor_branch_id
-       FROM encounters WHERE appointment_id = $1`,
+      `SELECT e.id, e.patient_user_id, e.doctor_user_id, a.doctor_branch_id
+       FROM encounters e
+       JOIN appointments a ON a.id = e.appointment_id
+       WHERE e.appointment_id = $1`,
       [appointmentId],
     );
     if (encRes.rows.length === 0) {
@@ -1043,7 +1045,9 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
       diagnoses,
       prescriptions,
       prescription_items,
+      lab_orders,
       lab_order_items,
+      radiology_orders,
       radiology_order_items,
     } = req.body;
 
@@ -1182,6 +1186,50 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
             `UPDATE prescription_items SET ${iFields.join(', ')} WHERE id = $${ii}`,
             iVals,
           );
+        }
+      }
+    }
+
+    // Create new lab orders (with test_ids)
+    if (Array.isArray(lab_orders)) {
+      for (const lo of lab_orders) {
+        const loRow = await client.query(
+          `INSERT INTO lab_orders
+             (encounter_id, patient_user_id, doctor_user_id, doctor_branch_id, ordered_by, priority, clinical_notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [encounterId, patient_user_id, doctor_user_id, doctor_branch_id, userId,
+           lo.priority ?? 'routine', lo.clinical_notes ?? null],
+        );
+        const loId = loRow.rows[0].id;
+        if (Array.isArray(lo.test_ids)) {
+          for (const testId of lo.test_ids) {
+            await client.query(
+              `INSERT INTO lab_order_items (lab_order_id, lab_test_id) VALUES ($1,$2)`,
+              [loId, testId],
+            );
+          }
+        }
+      }
+    }
+
+    // Create new radiology orders (with test_ids)
+    if (Array.isArray(radiology_orders)) {
+      for (const ro of radiology_orders) {
+        const roRow = await client.query(
+          `INSERT INTO radiology_orders
+             (encounter_id, patient_user_id, doctor_user_id, branch_id, ordered_by, priority, clinical_notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [encounterId, patient_user_id, doctor_user_id, doctor_branch_id, userId,
+           ro.priority ?? 'routine', ro.clinical_notes ?? null],
+        );
+        const roId = roRow.rows[0].id;
+        if (Array.isArray(ro.test_ids)) {
+          for (const testId of ro.test_ids) {
+            await client.query(
+              `INSERT INTO radiology_order_items (radiology_order_id, radiology_test_id) VALUES ($1,$2)`,
+              [roId, testId],
+            );
+          }
         }
       }
     }
