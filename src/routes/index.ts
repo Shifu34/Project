@@ -88,7 +88,12 @@ router.post('/add-payment',
 	authenticate,
 	authorize('patient'),
 	body('amount').isFloat({ min: 0.01 }),
-	body('payment_method').optional().isIn(['cash','credit_card','debit_card','insurance','bank_transfer','cheque','online']),
+	body('payment_method').optional().customSanitizer((v: unknown) => {
+		if (typeof v !== 'string') return v;
+		const lower = v.toLowerCase().replace(/\s+/g, '_');
+		if (lower === 'card') return 'credit_card';
+		return lower;
+	}).isIn(['cash','credit_card','debit_card','insurance','bank_transfer','cheque','online']),
 	body('payment_status').optional().isIn(['completed','pending','failed','refunded']),
 	body('paid_at').optional().isISO8601(),
 	body('patient_user_id').optional().isInt(),
