@@ -19,6 +19,7 @@ import callTranscriptionRoutes   from './call-transcription.routes';
 import organizationRoutes        from './organization.routes';
 import notificationRoutes        from './notification.routes';
 import * as apptCtrl from '../controllers/appointment.controller';
+import * as callCtrl from '../controllers/call.controller';
 import { getDashboardStats } from '../controllers/dashboard.controller';
 import {
 	addDoctorSchedule,
@@ -54,6 +55,24 @@ router.use('/ai-summaries',         aiSummaryRoutes);
 router.use('/call-transcriptions',  callTranscriptionRoutes);
 router.use('/organizations',        organizationRoutes);
 router.use('/notifications',        notificationRoutes);
+router.post('/create-call-room',
+	authenticate,
+	authorize('admin', 'doctor', 'patient'),
+	body('appointment_id').isInt(),
+	validate,
+	callCtrl.createCallRoom,
+);
+router.get('/call-room', authenticate, callCtrl.getCallRoom);
+router.get('/call-room-detail', authenticate, callCtrl.getRoomDetail);
+router.post('/call-token',
+	authenticate,
+	body('room_id').isString().notEmpty(),
+	body('user_id').isString().notEmpty(),
+	body('role').isIn(['doctor', 'patient']),
+	validate,
+	callCtrl.generateToken,
+);
+router.get('/call-rooms', authenticate, authorize('admin'), callCtrl.listRooms);
 router.get('/my-appointments', authenticate, apptCtrl.getMyAppointments);
 router.get('/upcoming-appointment', authenticate, apptCtrl.getUpcomingAppointment);
 router.post('/create-appointment',

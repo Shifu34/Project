@@ -1,10 +1,43 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import https from 'https';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
 import { env } from '../config/env';
 import { AuthRequest } from '../middleware/auth.middleware';
+
+const normalizeUserIds = (value: unknown): unknown => {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(normalizeUserIds);
+
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+
+  for (const [key, val] of Object.entries(obj)) {
+    const normalizedVal = normalizeUserIds(val);
+    if (key === 'patient_id') {
+      out.patient_user_id = normalizedVal;
+      continue;
+    }
+    if (key === 'doctor_id') {
+      out.doctor_user_id = normalizedVal;
+      continue;
+    }
+    out[key] = normalizedVal;
+  }
+
+  return out;
+};
+
+const getAppointmentIdFromRequest = (req: Request): number | null => {
+  const raw = (req.query.appointment_id ?? req.body.appointment_id ?? req.params.appointment_id ?? req.params.appointmentId) as
+    | string
+    | number
+    | undefined;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 
 // ── helper: make JSON request to 100ms API ─────────────────────
 function hmsRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -115,7 +148,7 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
       [appointment_id],
     );
     if (existing.rows.length > 0) {
-      res.json({ success: true, data: existing.rows[0] });
+      res.json({ success: true, data: normalizeUserIds(existing.rows[0]) });
       return;
     }
 
@@ -183,7 +216,7 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
       console.error('[register-room] notification failed:', fdaErr);
     }
 
-    res.status(201).json({ success: true, data: insertResult.rows[0] });
+    res.status(201).json({ success: true, data: normalizeUserIds(insertResult.rows[0]) });
   } catch (err: unknown) {
     // Surface the real error message so it appears in Railway logs and debug responses
     const message = err instanceof Error ? err.message : String(err);
@@ -195,11 +228,15 @@ export const createCallRoom = async (req: AuthRequest, res: Response, next: Next
 // ── GET /calls/room/:appointment_id  — fetch existing room ────
 export const getCallRoom = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { appointment_id } = req.params;
+    const appointmentId = getAppointmentIdFromRequest(req);
+    if (!appointmentId) {
+      res.status(400).json({ success: false, message: 'appointment_id is required' });
+      return;
+    }
 
     const result = await query(
       `SELECT * FROM video_call_rooms WHERE appointment_id = $1`,
-      [appointment_id],
+      [appointmentId],
     );
 
     if (result.rows.length === 0) {
@@ -207,7 +244,7 @@ export const getCallRoom = async (req: AuthRequest, res: Response, next: NextFun
       return;
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    res.json({ success: true, data: normalizeUserIds(result.rows[0]) });
   } catch (err) {
     next(err);
   }
@@ -297,11 +334,15 @@ export const updateRoomStatus = async (req: AuthRequest, res: Response, next: Ne
 // ── GET /calls/room/:appointment_id/detail  — get 100ms room detail ──
 export const getRoomDetail = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { appointment_id } = req.params;
+    const appointmentId = getAppointmentIdFromRequest(req);
+    if (!appointmentId) {
+      res.status(400).json({ success: false, message: 'appointment_id is required' });
+      return;
+    }
 
     const roomResult = await query(
       `SELECT room_id FROM video_call_rooms WHERE appointment_id = $1`,
-      [appointment_id],
+      [appointmentId],
     );
     if (roomResult.rows.length === 0) {
       res.status(404).json({ success: false, message: 'No call room found for this appointment' });
@@ -310,17 +351,36 @@ export const getRoomDetail = async (req: AuthRequest, res: Response, next: NextF
 
     const roomId = roomResult.rows[0].room_id;
     const data = await hmsRequest<Record<string, unknown>>('GET', `/v2/rooms/${roomId}`);
-    res.json({ success: true, data });
+    res.json({ success: true, data: normalizeUserIds(data) });
   } catch (err) {
     next(err);
   }
 };
 
 // ── GET /calls/rooms  — list all 100ms rooms ─────────────────
-export const listRooms = async (_req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+export const listRooms = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const page = Math.max(1, parseInt(req.query.page as string || '1', 10));
+    const limit = Math.min(100, parseInt(req.query.limit as string || '20', 10));
+    const offset = (page - 1) * limit;
+
     const data = await hmsRequest<Record<string, unknown>>('GET', '/v2/rooms');
-    res.json({ success: true, data });
+    const rooms = Array.isArray((data as { data?: unknown[] }).data)
+      ? (data as { data: unknown[] }).data
+      : null;
+
+    if (rooms) {
+      const total = rooms.length;
+      const pageData = rooms.slice(offset, offset + limit).map(normalizeUserIds);
+      res.json({
+        success: true,
+        data: pageData,
+        pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      });
+      return;
+    }
+
+    res.json({ success: true, data: normalizeUserIds(data) });
   } catch (err) {
     next(err);
   }
