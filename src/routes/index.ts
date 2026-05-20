@@ -80,7 +80,7 @@ router.patch('/update-notification',
 	validate,
 	notifCtrl.updateNotification,
 );
-router.get('/my-payments', authenticate, authorize('patient'), billingCtrl.getMyPayments);
+router.get('/my-payments', authenticate, billingCtrl.getMyPayments);
 router.post('/add-payment',
 	authenticate,
 	authorize('patient'),
