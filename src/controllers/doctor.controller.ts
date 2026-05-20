@@ -291,9 +291,10 @@ export const updateDoctor = async (req: Request, res: Response, next: NextFuncti
 };
 
 // GET /doctors/:id/appointments  (today or by date)
-export const getDoctorAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getDoctorAppointments = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const hidePaymentTimeout = req.user?.roleName === 'doctor' || req.user?.roleName === 'patient';
     const branchId = getBranchIdFromRequest(req);
     if (!branchId) {
       res.status(400).json({ success: false, message: 'branch_id is required' });
@@ -306,15 +307,17 @@ export const getDoctorAppointments = async (req: Request, res: Response, next: N
       return;
     }
 
-    const result = await query(
-      `SELECT a.*, CONCAT(p.first_name,' ',p.last_name) AS patient_name,
-              p.patient_code, p.phone AS patient_phone
-       FROM appointments a
-        JOIN patients p ON p.user_id = a.patient_user_id
-        WHERE a.doctor_user_id = $1 AND a.doctor_branch_id = $2 AND a.appointment_date = $3
-       ORDER BY a.appointment_time ASC`,
-            [doctorUserId, branchId, date],
-    );
+        const paymentTimeoutClause = hidePaymentTimeout ? "AND a.status != 'payment_timeout'" : '';
+        const result = await query(
+          `SELECT a.*, CONCAT(p.first_name,' ',p.last_name) AS patient_name,
+            p.patient_code, p.phone AS patient_phone
+           FROM appointments a
+      JOIN patients p ON p.user_id = a.patient_user_id
+      WHERE a.doctor_user_id = $1 AND a.doctor_branch_id = $2 AND a.appointment_date = $3
+        ${paymentTimeoutClause}
+           ORDER BY a.appointment_time ASC`,
+          [doctorUserId, branchId, date],
+        );
     res.json({ success: true, data: result.rows });
   } catch (err) {
     next(err);
@@ -1249,9 +1252,10 @@ export const deleteDoctorSchedule = async (req: AuthRequest, res: Response, next
 };
 
 // GET /doctor-booked-appointments?doctor_user_id=...&doctor_branch_id=...&date=YYYY-MM-DD
-export const getDoctorBookedAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getDoctorBookedAppointments = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const hidePaymentTimeout = req.user?.roleName === 'doctor' || req.user?.roleName === 'patient';
     const doctorUserId = getDoctorUserIdFromRequest(req);
     if (!doctorUserId) {
       res.status(400).json({ success: false, message: 'doctor_user_id is required' });
@@ -1261,6 +1265,7 @@ export const getDoctorBookedAppointments = async (req: Request, res: Response, n
     const branchId = getDoctorBranchIdFromRequest(req);
 
     const fetchAppointments = async (branch: number) => {
+      const paymentTimeoutClause = hidePaymentTimeout ? "AND a.status != 'payment_timeout'" : '';
       const result = await query(
         `SELECT a.*,
                 nov.name AS nature_of_visit,
@@ -1273,6 +1278,7 @@ export const getDoctorBookedAppointments = async (req: Request, res: Response, n
            AND a.doctor_branch_id = $2
            AND a.appointment_date = $3
            AND a.status NOT IN ('cancelled', 'no_show')
+           ${paymentTimeoutClause}
          ORDER BY a.appointment_time ASC`,
         [doctorUserId, branch, date],
       );

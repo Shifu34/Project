@@ -10,13 +10,14 @@ const getAppointmentIdFromRequest = (req: Request): number | null => {
 };
 
 // GET /appointments
-export const getAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getAppointments = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const page   = Math.max(1,   parseInt(req.query.page as string || '1',  10));
     const size   = Math.min(100, parseInt((req.query.size || req.query.limit) as string || '20', 10));
     const date   = req.query.date   as string | undefined;
     const status = req.query.status as string | undefined;
     const offset = (page - 1) * size;
+    const hidePaymentTimeout = req.user?.roleName === 'doctor' || req.user?.roleName === 'patient';
 
     const mainParams: unknown[] = [size, offset];
     const countParams: unknown[] = [];
@@ -36,8 +37,9 @@ export const getAppointments = async (req: Request, res: Response, next: NextFun
       countConditions.push(`a.status = $${countIdx++}`);
       mainParams.push(status);
       countParams.push(status);
-    } else {
-      // Always hide payment_timeout rows from normal listing
+    }
+
+    if (!status || hidePaymentTimeout) {
       mainConditions.push(`a.status != 'payment_timeout'`);
       countConditions.push(`a.status != 'payment_timeout'`);
     }
@@ -72,7 +74,7 @@ export const getAppointments = async (req: Request, res: Response, next: NextFun
 };
 
 // GET /appointments/:id
-export const getAppointmentById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getAppointmentById = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const result = await query(
       `SELECT a.*,
@@ -91,7 +93,14 @@ export const getAppointmentById = async (req: Request, res: Response, next: Next
       res.status(404).json({ success: false, message: 'Appointment not found' });
       return;
     }
-    res.json({ success: true, data: result.rows[0] });
+
+    const row = result.rows[0];
+    if ((req.user?.roleName === 'doctor' || req.user?.roleName === 'patient') && row.status === 'payment_timeout') {
+      res.status(404).json({ success: false, message: 'Appointment not found' });
+      return;
+    }
+
+    res.json({ success: true, data: row });
   } catch (err) {
     next(err);
   }
@@ -368,6 +377,9 @@ export const getMyAppointments = async (req: AuthRequest, res: Response, next: N
     let dataIdx = ownerParams.length + 3;
     let countIdx = ownerParams.length + 1;
 
+    dataConditions.push(`a.status != 'payment_timeout'`);
+    countConditions.push(`a.status != 'payment_timeout'`);
+
     if (status) {
       dataConditions.push(`a.status = $${dataIdx++}`);
       countConditions.push(`a.status = $${countIdx++}`);
@@ -494,7 +506,7 @@ export const getUpcomingAppointment = async (req: AuthRequest, res: Response, ne
          AND (a.appointment_date > $3::date
               OR (a.appointment_date = $3::date AND a.appointment_time >= $4::time))
          AND a.appointment_date <= $3::date + ($2 || ' days')::INTERVAL
-         AND a.status NOT IN ('cancelled', 'no_show', 'completed', 'pending', 'in_progress')
+         AND a.status NOT IN ('cancelled', 'no_show', 'completed', 'pending', 'in_progress', 'payment_timeout')
        ORDER BY a.appointment_date ASC, a.appointment_time ASC
        LIMIT 1`,
       [...ownerParams, days, currentDate, currentTime],
@@ -1205,9 +1217,10 @@ export const updateAppointmentEncounter = async (req: AuthRequest, res: Response
 };
 
 // GET /appointments/range?start=YYYY-MM-DD&end=YYYY-MM-DD[&status=confirmed]
-export const getAppointmentsByDateRange = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getAppointmentsByDateRange = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { start, end, status } = req.query as { start?: string; end?: string; status?: string };
+    const hidePaymentTimeout = req.user?.roleName === 'doctor' || req.user?.roleName === 'patient';
 
     if (!start || !end) {
       res.status(400).json({ success: false, message: 'start and end query params are required (YYYY-MM-DD)' });
@@ -1230,6 +1243,7 @@ export const getAppointmentsByDateRange = async (req: Request, res: Response, ne
     const extraFilters: string[] = [];
 
     if (status) { extraFilters.push(`a.status = $${idx++}`); params.push(status); }
+    if (hidePaymentTimeout) { extraFilters.push(`a.status != 'payment_timeout'`); }
 
     const extraWhere = extraFilters.length ? `AND ${extraFilters.join(' AND ')}` : '';
 

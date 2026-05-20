@@ -367,8 +367,10 @@ export const deletePatient = async (req: Request, res: Response, next: NextFunct
 };
 
 // GET /patients/:id/appointments
-export const getPatientAppointments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getPatientAppointments = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const hidePaymentTimeout = req.user?.roleName === 'doctor' || req.user?.roleName === 'patient';
+    const paymentTimeoutClause = hidePaymentTimeout ? "AND a.status != 'payment_timeout'" : '';
     const result = await query(
       `SELECT a.*, CONCAT(u.first_name,' ',u.last_name) AS doctor_name, d.name AS department
       FROM appointments a
@@ -377,6 +379,7 @@ export const getPatientAppointments = async (req: Request, res: Response, next: 
        JOIN users u ON u.id = doc.user_id
        LEFT JOIN departments d ON d.id = doc.department_id
        WHERE p.id = $1
+       ${paymentTimeoutClause}
        ORDER BY a.appointment_date DESC, a.appointment_time DESC`,
       [req.params.id],
     );
