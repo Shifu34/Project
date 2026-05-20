@@ -785,7 +785,7 @@ export const getPatientLabOrders = async (req: Request, res: Response, next: Nex
          LEFT JOIN lab_order_items loi ON loi.lab_order_id = lo.id
          LEFT JOIN lab_test_catalog ltc ON ltc.id = loi.lab_test_id
          WHERE lo.patient_user_id = $3 ${statusClause}
-         GROUP BY lo.id, u.first_name, u.last_name, d.specialization
+         GROUP BY lo.id, d.employee_id, u.first_name, u.last_name, d.specialization
          ORDER BY lo.order_date DESC
          LIMIT $1 OFFSET $2`,
         params,
@@ -859,7 +859,7 @@ export const getPatientRadiologyOrders = async (req: Request, res: Response, nex
          LEFT JOIN radiology_order_items roi ON roi.radiology_order_id = ro.id
          LEFT JOIN radiology_test_catalog rtc ON rtc.id = roi.radiology_test_id
          WHERE ro.patient_user_id = $3 ${statusClause}
-         GROUP BY ro.id, u.first_name, u.last_name, d.specialization
+         GROUP BY ro.id, d.employee_id, u.first_name, u.last_name, d.specialization
          ORDER BY ro.order_date DESC
          LIMIT $1 OFFSET $2`,
         params,
@@ -932,7 +932,7 @@ export const getPatientPrescriptions = async (req: Request, res: Response, next:
          LEFT JOIN users u ON u.id = d.user_id
          LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
          WHERE p.patient_user_id = $3 ${statusClause}
-         GROUP BY p.id, u.first_name, u.last_name, d.specialization
+         GROUP BY p.id, d.employee_id, u.first_name, u.last_name, d.specialization
          ORDER BY p.prescription_date DESC
          LIMIT $1 OFFSET $2`,
         params,

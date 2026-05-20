@@ -847,7 +847,7 @@ export const saveAppointmentEncounter = async (req: AuthRequest, res: Response, 
         (appointment_id, patient_user_id, doctor_user_id, encounter_type,
           chief_complaint, history_of_present_illness, physical_examination,
           assessment, plan, follow_up_date, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'in_progress')
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'in_progress')
        RETURNING *`,
       [appointmentId, patient_user_id, doctor_user_id,
        enc?.encounter_type ?? 'outpatient',
