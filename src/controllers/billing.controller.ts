@@ -171,24 +171,47 @@ export const recordPayment = async (req: AuthRequest, res: Response, next: NextF
       patientUserId = patRes.rows[0].user_id;
     }
 
-    const result = await query(
-      `INSERT INTO payments
-         (appointment_id, patient_user_id, amount, payment_method, transaction_reference,
-          payment_status, paid_at, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [
-        appointment_id        ?? null,
-        patientUserId,
-        amount,
-        payment_method        ?? null,
-        transaction_reference ?? null,
-        payment_status        ?? 'completed',
-        paid_at               ?? null,
-        notes                 ?? null,
-      ],
-    );
+    const finalStatus = payment_status ?? 'completed';
 
-    res.status(201).json({ success: true, data: result.rows[0] });
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query(
+        `INSERT INTO payments
+           (appointment_id, patient_user_id, amount, payment_method, transaction_reference,
+            payment_status, paid_at, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+        [
+          appointment_id        ?? null,
+          patientUserId,
+          amount,
+          payment_method        ?? null,
+          transaction_reference ?? null,
+          finalStatus,
+          paid_at               ?? null,
+          notes                 ?? null,
+        ],
+      );
+
+      // When payment is completed and linked to an appointment, move it to confirmed
+      if (finalStatus === 'completed' && appointment_id) {
+        await client.query(
+          `UPDATE appointments
+           SET status = 'confirmed', updated_at = NOW()
+           WHERE id = $1 AND status IN ('scheduled', 'payment_timeout')`,
+          [appointment_id],
+        );
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     next(err);
   }
